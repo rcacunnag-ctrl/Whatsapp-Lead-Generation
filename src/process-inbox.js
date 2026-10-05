@@ -3,7 +3,8 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { listInbox, moveTo, loadState, saveState } from './store.js';
 import { processPost } from './pipeline.js';
-import { writeRows } from './sink.js';
+import { writeRows, exportXlsx } from './sink.js';
+import { closeOcr } from './ocr.js';
 
 let running = null;
 let rerun = false;
@@ -44,6 +45,7 @@ export function processInbox(log = console) {
           }
         }
       } while (rerun);
+      if (summary.rows) await exportXlsx();
     } finally {
       running = null;
     }
@@ -54,5 +56,6 @@ export function processInbox(log = console) {
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const s = await processInbox();
+  await closeOcr();
   console.log(`Publicaciones: ${s.posts} | Propiedades: ${s.rows} | En zona: ${s.inZone} | Fallidas: ${s.failed}`);
 }

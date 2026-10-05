@@ -1,24 +1,28 @@
 {
   "name": "whatsapp-property-monitor",
   "version": "0.1.0",
-  "description": "MVP: monitorea grupos de WhatsApp con propiedades en venta y extrae leads de Palm Beach, Broward y Martin County a Google Sheets.",
+  "description": "MVP: monitorea grupos de WhatsApp con propiedades en venta y extrae leads de Palm Beach, Broward y Martin County. 100% local, sin APIs pagas.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/index.js",
     "groups": "node src/index.js --list-groups",
     "process": "node src/process-inbox.js",
     "import": "node src/import-chat.js",
+    "panel": "node src/dashboard.js",
+    "excel": "node -e \"import('./src/sink.js').then(m=>m.exportXlsx()).then(f=>console.log(f))\"",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "dotenv": "^16.4.5",
-    "googleapis": "^183.0.0",
+    "exceljs": "^4.4.0",
     "pino": "^9.5.0",
     "qrcode-terminal": "^0.12.0",
-    "zod": "^4.1.0"
+    "tesseract.js": "^7.0.0"
   }
 }

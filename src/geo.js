@@ -1,4 +1,5 @@
-import { countyFromCity, cleanCountyName } from './counties.js';
+import { countyFromCity, countyFromZip, cleanCountyName } from './counties.js';
+import { config } from './config.js';
 
 const CENSUS_URL = 'https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress';
 
@@ -31,29 +32,30 @@ export function parseCensusResponse(json) {
 }
 
 /**
- * Determina el condado de un listado: primero geocodifica la dirección completa,
- * si falla usa la tabla ciudad -> condado.
+ * Determina el condado sin servicios externos: ZIP -> condado, luego ciudad -> condado.
+ * Opcional (USE_CENSUS_GEOCODER=true): consulta el Census Geocoder (gratuito, sin API key)
+ * solo cuando las tablas no resuelven o el resultado es ambiguo.
  * @returns {Promise<{county, method, matchedAddress, lat, lon, zip, ambiguous}>}
  */
-export async function resolveCounty(listing, opts = {}) {
+export async function resolveCounty(listing, { useCensus = config.useCensusGeocoder, ...opts } = {}) {
   const out = { county: null, method: 'none', matchedAddress: null, lat: null, lon: null, zip: null, ambiguous: false };
-  const oneLine = [listing.street_address, listing.city, listing.state || 'FL', listing.zip]
-    .filter(Boolean).join(', ');
 
-  if (listing.street_address && (listing.city || listing.zip)) {
+  const byZip = countyFromZip(listing.zip);
+  const byCity = countyFromCity(listing.city);
+  let local = null;
+  if (byZip.county) local = { ...out, county: byZip.county, ambiguous: byZip.ambiguous, method: 'zip_table' };
+  else if (byCity.county) local = { ...out, county: byCity.county, ambiguous: byCity.ambiguous, method: 'city_table' };
+  // ZIP y ciudad apuntan a condados distintos: hay que revisar
+  if (local && byZip.county && byCity.county && byZip.county !== byCity.county) local.ambiguous = true;
+
+  if (useCensus && listing.street_address && (listing.city || listing.zip) && (!local || local.ambiguous)) {
+    const oneLine = [listing.street_address, listing.city, listing.state || 'FL', listing.zip].filter(Boolean).join(', ');
     try {
       const geo = await censusGeocode(oneLine, opts);
-      if (geo?.county) {
-        return { ...out, ...geo, method: 'census_geocoder' };
-      }
+      if (geo?.county) return { ...out, ...geo, method: 'census_geocoder' };
     } catch (err) {
       out.error = err.message;
     }
   }
-
-  const byCity = countyFromCity(listing.city);
-  if (byCity.county) {
-    return { ...out, county: byCity.county, ambiguous: byCity.ambiguous, method: 'city_table' };
-  }
-  return out;
+  return local || out;
 }

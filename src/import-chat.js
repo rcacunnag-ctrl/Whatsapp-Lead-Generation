@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { enqueuePost } from './store.js';
 import { processInbox } from './process-inbox.js';
+import { closeOcr } from './ocr.js';
 
 // iOS:     [10/5/26, 9:15:32 AM] Nombre: texto
 // Android: 10/5/26, 9:15 AM - Nombre: texto
@@ -89,6 +90,7 @@ async function main() {
   }
   console.log(`Mensajes leídos: ${messages.length} | Publicaciones encoladas: ${queued}`);
   const s = await processInbox();
+  await closeOcr();
   console.log(`Propiedades: ${s.rows} | En zona: ${s.inZone} | Fallidas: ${s.failed}`);
 }
 

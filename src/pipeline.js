@@ -64,6 +64,7 @@ export async function processPost(post, deps = {}) {
         links_fotos: l.photo_links,
         links_portales: l.portal_links,
         resumen: l.summary,
+        texto_ocr: result.ocr_text || '',
         duplicado: first ? `SI (visto ${first.at} en ${first.group})` : 'NO',
         mensaje_original: post.text,
         imagenes_locales: (post.images || []).map((i) => i.path),

@@ -2,6 +2,7 @@ import { config } from './config.js';
 import { connect, resolveGroups, readMessage } from './whatsapp.js';
 import { enqueuePost, ensureDirs, loadState } from './store.js';
 import { processInbox } from './process-inbox.js';
+import { startDashboard } from './dashboard.js';
 
 const listOnly = process.argv.includes('--list-groups');
 let selected = new Map();
@@ -10,6 +11,7 @@ let markReady;
 const groupsReady = new Promise((r) => { markReady = r; }); // los mensajes offline llegan antes de resolver grupos
 
 await ensureDirs();
+if (!listOnly) startDashboard();
 
 async function flush(key, { process: run = true } = {}) {
   const post = pending.get(key);
