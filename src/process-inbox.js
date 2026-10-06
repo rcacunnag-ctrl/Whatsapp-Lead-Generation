@@ -3,7 +3,8 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { listInbox, moveTo, loadState, saveState } from './store.js';
 import { processPost } from './pipeline.js';
-import { writeRows, exportXlsx } from './sink.js';
+import { exportOutputs } from './sink.js';
+import { addLeads } from './leads.js';
 import { closeOcr } from './ocr.js';
 
 let running = null;
@@ -11,8 +12,8 @@ let rerun = false;
 
 async function processFile(file, summary) {
   const post = JSON.parse(await fs.readFile(file, 'utf8'));
-  const rows = await processPost(post);
-  await writeRows(rows);
+  const { rows, descartes } = await processPost(post);
+  const added = await addLeads(rows);
   // Se marca como visto solo después de escribir, para poder reintentar si falla la escritura.
   const state = await loadState();
   const now = new Date().toISOString();
@@ -20,8 +21,8 @@ async function processFile(file, summary) {
   await saveState();
   await moveTo(file, config.dirs.processed);
   summary.posts++;
-  summary.rows += rows.length;
-  summary.inZone += rows.filter((r) => r.en_zona === 'SI').length;
+  summary.rows += added.length;
+  summary.discarded += descartes.length + (rows.length - added.length);
 }
 
 /** Procesa todas las publicaciones en data/inbox. Seguro de llamar varias veces (no se solapa). */
@@ -31,7 +32,7 @@ export function processInbox(log = console) {
     return running;
   }
   running = (async () => {
-    const summary = { posts: 0, rows: 0, inZone: 0, failed: 0 };
+    const summary = { posts: 0, rows: 0, discarded: 0, failed: 0 };
     try {
       do {
         rerun = false;
@@ -45,7 +46,7 @@ export function processInbox(log = console) {
           }
         }
       } while (rerun);
-      if (summary.rows) await exportXlsx();
+      if (summary.rows) await exportOutputs();
     } finally {
       running = null;
     }
@@ -57,5 +58,5 @@ export function processInbox(log = console) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const s = await processInbox();
   await closeOcr();
-  console.log(`Publicaciones: ${s.posts} | Propiedades: ${s.rows} | En zona: ${s.inZone} | Fallidas: ${s.failed}`);
+  console.log(`Publicaciones: ${s.posts} | Leads nuevos: ${s.rows} | Descartadas: ${s.discarded} | Fallidas: ${s.failed}`);
 }

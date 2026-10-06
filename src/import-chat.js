@@ -91,7 +91,7 @@ async function main() {
   console.log(`Mensajes leídos: ${messages.length} | Publicaciones encoladas: ${queued}`);
   const s = await processInbox();
   await closeOcr();
-  console.log(`Propiedades: ${s.rows} | En zona: ${s.inZone} | Fallidas: ${s.failed}`);
+  console.log(`Leads nuevos: ${s.rows} | Descartadas: ${s.discarded} | Fallidas: ${s.failed}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();

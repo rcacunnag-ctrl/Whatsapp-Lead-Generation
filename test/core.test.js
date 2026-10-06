@@ -9,10 +9,13 @@ process.env.USE_CENSUS_GEOCODER = 'false';
 
 const { countyFromCity, countyFromZip } = await import('../src/counties.js');
 const { extractListings, parseMoney } = await import('../src/extract.js');
-const { writeRows, readAllRows, exportXlsx } = await import('../src/sink.js');
+const { exportOutputs } = await import('../src/sink.js');
 const { parseCensusResponse, resolveCounty } = await import('../src/geo.js');
 const { parseExport, groupIntoPosts } = await import('../src/import-chat.js');
-const { processPost, zoneFlag } = await import('../src/pipeline.js');
+const { processPost, classify } = await import('../src/pipeline.js');
+const leadsMod = await import('../src/leads.js');
+const actions = await import('../src/actions.js');
+const { ESTADOS } = leadsMod;
 const { addressKey } = await import('../src/store.js');
 
 test('ciudad -> condado', () => {
@@ -133,19 +136,25 @@ test('OCR local de un flyer (sin internet)', { timeout: 120000 }, async () => {
   assert.equal(l.price_usd, 410000);
 });
 
-test('salida local: JSONL + CSV + Excel', async () => {
-  await writeRows([{ fecha_mensaje: 't', en_zona: 'SI', direccion: '1 Main St', precio_usd: 100000, imagenes_locales: [] }]);
-  const rows = await readAllRows();
-  assert.ok(rows.length >= 1);
-  const file = await exportXlsx();
+test('salida local: CSV + Excel desde leads.json', async () => {
+  await leadsMod.addLeads([{ estado: ESTADOS.nuevo, fecha_mensaje: 't', direccion: '1 Main St', precio_usd: 100000, imagenes_locales: [] }]);
+  const file = await exportOutputs();
   assert.ok(file && (await fs.stat(file)).size > 0);
+  const csv = await fs.readFile(path.join(process.env.DATA_DIR, 'propiedades.csv'), 'utf8');
+  assert.match(csv, /"estado"/);
+  assert.match(csv, /1 Main St/);
 });
 
-test('zona objetivo', () => {
-  assert.equal(zoneFlag('Broward', false), 'SI');
-  assert.equal(zoneFlag('Miami-Dade', false), 'NO');
-  assert.equal(zoneFlag(null, false), 'REVISAR');
-  assert.equal(zoneFlag('Palm Beach', true), 'REVISAR');
+test('reglas de entrada R2-R6', () => {
+  const geoB = { county: 'Broward', ambiguous: false };
+  assert.deepEqual(classify({ street_address: null, arv_usd: null }, {}), { descartar: 'sin dirección ni ARV' });
+  assert.equal(classify({ street_address: null, arv_usd: 400000 }, {}).estado, ESTADOS.pendienteDireccion);
+  assert.match(classify({ street_address: null, arv_usd: 400000 }, {}).alerta, /wholesaler/);
+  assert.equal(classify({ street_address: '1 Main St' }, geoB).estado, ESTADOS.nuevo);
+  assert.equal(classify({ street_address: '1 Main St' }, { county: 'Martin' }).estado, ESTADOS.nuevo);
+  assert.match(classify({ street_address: '1 Main St' }, { county: 'Miami-Dade' }).descartar, /fuera de condado/);
+  assert.equal(classify({ street_address: '1 Main St' }, { county: null }).estado, ESTADOS.revisarCondado);
+  assert.equal(classify({ street_address: '1 Main St' }, { county: 'Palm Beach', ambiguous: true }).estado, ESTADOS.revisarCondado);
 });
 
 test('parser de chat exportado (iOS) y agrupación por autor', async () => {
@@ -186,13 +195,66 @@ test('pipeline completo con extracción simulada y detección de duplicados', as
     extract: async () => ({ is_property_listing: true, listings: [listing] }),
     geocode: async () => ({ county: 'Broward', method: 'census_geocoder', matchedAddress: '1234 NW 5TH AVE, FORT LAUDERDALE, FL, 33311', ambiguous: false }),
   };
-  const [row] = await processPost({ id: 'm1', timestamp: 't1', groupName: 'G1', sender: 'Carlos', text: 'x' }, deps);
-  assert.equal(row.en_zona, 'SI');
+  const { rows: [row] } = await processPost({ id: 'm1', timestamp: 't1', groupName: 'G1', sender: 'Carlos', text: 'x' }, deps);
+  assert.equal(row.estado, ESTADOS.nuevo);
   assert.equal(row.estado_direccion, 'COMPLETA');
   assert.equal(row.duplicado, 'NO');
-  const [dup] = await processPost({ id: 'm2', timestamp: 't2', groupName: 'G2', sender: 'Otro', text: 'x' }, deps);
+  assert.ok(row.clave_direccion);
+  const { rows: [dup] } = await processPost({ id: 'm2', timestamp: 't2', groupName: 'G2', sender: 'Otro', text: 'x' }, deps);
   assert.match(dup.duplicado, /^SI/);
 
+  const fuera = await processPost({ id: 'm4', text: 'x' }, { ...deps, geocode: async () => ({ county: 'Miami-Dade', ambiguous: false }) });
+  assert.equal(fuera.rows.length, 0);
+  assert.equal(fuera.descartes.length, 1);
+
   const none = await processPost({ id: 'm3', text: 'hola' }, { extract: async () => ({ is_property_listing: false, listings: [] }) });
-  assert.deepEqual(none, []);
+  assert.deepEqual(none, { rows: [], descartes: [] });
+});
+
+test('acciones: descartar borra y bloquea reingreso; Tier 1 registra usuario', async () => {
+  const [a, b] = await leadsMod.addLeads([
+    { estado: ESTADOS.nuevo, direccion: '10 A St', clave_direccion: '10 A ST 33311' },
+    { estado: ESTADOS.nuevo, direccion: '20 B St', clave_direccion: '20 B ST 33311' },
+  ]);
+  await actions.descartar(a.id);
+  const ids = (await leadsMod.listLeads()).map((l) => l.id);
+  assert.ok(!ids.includes(a.id));
+  const again = await leadsMod.addLeads([{ estado: ESTADOS.nuevo, direccion: '10 A St', clave_direccion: '10 A ST 33311' }]);
+  assert.equal(again.length, 0);
+  // el lead descartado no deja ningún dato, solo la clave
+  const raw = JSON.parse(await fs.readFile(path.join(process.env.DATA_DIR, 'leads.json'), 'utf8'));
+  assert.ok(raw.descartados['10 A ST 33311']);
+  assert.ok(!JSON.stringify(raw.leads).includes('10 A St'));
+
+  await assert.rejects(actions.pasarATier1(b.id, 'Pedro'), /Usuario no válido/);
+  const t1 = await actions.pasarATier1(b.id, 'Carlos');
+  assert.equal(t1.skill.lanzado, false); // por habilitar
+  const lead = (await leadsMod.listLeads()).find((l) => l.id === b.id);
+  assert.equal(lead.estado, ESTADOS.tier1);
+  assert.equal(lead.tier1_usuario, 'Carlos');
+});
+
+test('acciones: agregar dirección a un lead con ARV', async () => {
+  const [p1, p2, p3] = await leadsMod.addLeads([
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
+  ]);
+  await assert.rejects(actions.pasarATier1(p1.id, 'Jaime'), /Primero agrega la dirección/);
+  const geo = (county, ambiguous = false) => ({ geocode: async () => ({ county, ambiguous, method: 'test' }) });
+
+  const ok = await actions.agregarDireccion(p1.id, { calle: '500 E Ocean Ave', ciudad: 'Boynton Beach', zip: '33435' }, 'Jaime', geo('Palm Beach'));
+  assert.equal(ok.resultado, 'tier1');
+  const lead = (await leadsMod.listLeads()).find((l) => l.id === p1.id);
+  assert.equal(lead.estado, ESTADOS.tier1);
+  assert.equal(lead.direccion, '500 E Ocean Ave');
+  assert.equal(lead.alerta, '');
+
+  const out = await actions.agregarDireccion(p2.id, { calle: '1 Brickell Ave', ciudad: 'Miami' }, 'Jaime', geo('Miami-Dade'));
+  assert.equal(out.resultado, 'descartado');
+  assert.ok(!(await leadsMod.listLeads()).some((l) => l.id === p2.id));
+
+  await assert.rejects(actions.agregarDireccion(p3.id, { calle: '1 Main St' }, 'Jaime', geo(null)), /No se pudo confirmar el condado/);
+  await assert.rejects(actions.agregarDireccion(p3.id, { calle: '' }, 'Jaime', geo('Broward')), /número y calle/);
+  assert.equal((await leadsMod.listLeads()).find((l) => l.id === p3.id).estado, ESTADOS.pendienteDireccion);
 });

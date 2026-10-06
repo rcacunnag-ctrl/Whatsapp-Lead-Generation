@@ -26,12 +26,18 @@ export const config = {
 
   targetCounties: list(process.env.TARGET_COUNTIES || 'Palm Beach,Broward,Martin'),
 
+  // Tier 1: usuarios que pueden ejecutar el comp-analysis-report y si el lanzamiento está activo
+  tier1Users: list(process.env.TIER1_USERS || 'Andres,Carlos,Jaime'),
+  tier1SkillEnabled: bool(process.env.TIER1_SKILL_ENABLED, false),
+
   dirs: {
     inbox: path.join(DATA_DIR, 'inbox'),
     processed: path.join(DATA_DIR, 'processed'),
     failed: path.join(DATA_DIR, 'failed'),
     media: path.join(DATA_DIR, 'media'),
+    tier1Jobs: path.join(DATA_DIR, 'tier1-jobs'),
   },
+  leadsFile: path.join(DATA_DIR, 'leads.json'),
   stateFile: path.join(DATA_DIR, 'state.json'),
   jsonlFile: path.join(DATA_DIR, 'propiedades.jsonl'),
   csvFile: path.join(DATA_DIR, 'propiedades.csv'),

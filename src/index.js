@@ -3,6 +3,7 @@ import { connect, resolveGroups, readMessage } from './whatsapp.js';
 import { enqueuePost, ensureDirs, loadState } from './store.js';
 import { processInbox } from './process-inbox.js';
 import { startDashboard } from './dashboard.js';
+import { migrateLegacy } from './migrate.js';
 
 const listOnly = process.argv.includes('--list-groups');
 let selected = new Map();
@@ -11,7 +12,10 @@ let markReady;
 const groupsReady = new Promise((r) => { markReady = r; }); // los mensajes offline llegan antes de resolver grupos
 
 await ensureDirs();
-if (!listOnly) startDashboard();
+if (!listOnly) {
+  await migrateLegacy();
+  startDashboard();
+}
 
 async function flush(key, { process: run = true } = {}) {
   const post = pending.get(key);
@@ -23,7 +27,7 @@ async function flush(key, { process: run = true } = {}) {
   console.log(`[${post.groupName}] publicación encolada (${post.images.length} imágenes)`);
   if (run && config.processMode === 'realtime') {
     const s = await processInbox();
-    if (s) console.log(`  -> propiedades: ${s.rows}, en zona: ${s.inZone}, fallidas: ${s.failed}`);
+    if (s) console.log(`  -> leads nuevos: ${s.rows}, descartadas: ${s.discarded}, fallidas: ${s.failed}`);
   }
 }
 

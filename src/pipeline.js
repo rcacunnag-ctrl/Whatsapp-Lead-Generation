@@ -2,77 +2,112 @@ import { config } from './config.js';
 import { extractListings } from './extract.js';
 import { resolveCounty } from './geo.js';
 import { loadState, addressKey } from './store.js';
+import { ESTADOS } from './leads.js';
 
 const ADDRESS_STATUS = { complete: 'COMPLETA', partial: 'PARCIAL', missing: 'SIN DIRECCION' };
+export const ALERTA_DIRECCION = 'Solicitar dirección al wholesaler';
 
-export function zoneFlag(county, ambiguous) {
-  if (!county) return 'REVISAR';
-  const inTarget = config.targetCounties.some((t) => t.toLowerCase() === county.toLowerCase());
-  if (ambiguous) return inTarget ? 'REVISAR' : 'NO';
-  return inTarget ? 'SI' : 'NO';
+export function inTargetCounty(county) {
+  return Boolean(county) && config.targetCounties.some((t) => t.toLowerCase() === county.toLowerCase());
 }
 
 /**
- * Procesa una publicación cruda y devuelve las filas a escribir.
+ * Reglas de entrada (docs/PLAN-FLUJO-LEADS.md):
+ *  sin calle y sin ARV -> descartar | sin calle con ARV -> Pendiente dirección
+ *  con calle: condado objetivo -> Nuevo | otro condado -> descartar | sin determinar -> Revisar condado
+ * @returns {{ estado: string, alerta?: string } | { descartar: string }}
+ */
+export function classify(listing, geo) {
+  if (!listing.street_address) {
+    return listing.arv_usd ? { estado: ESTADOS.pendienteDireccion, alerta: ALERTA_DIRECCION } : { descartar: 'sin dirección ni ARV' };
+  }
+  if (!geo.county || geo.ambiguous) return { estado: ESTADOS.revisarCondado };
+  return inTargetCounty(geo.county) ? { estado: ESTADOS.nuevo } : { descartar: `fuera de condado (${geo.county})` };
+}
+
+/**
+ * Procesa una publicación cruda y devuelve los leads que entran y los descartes automáticos.
  * @param {{id, timestamp, groupName, sender, text, images}} post
  * @param {{extract?: Function, geocode?: Function}} deps  (inyectables para pruebas)
+ * @returns {Promise<{rows: object[], descartes: {motivo, direccion, ciudad}[]}>}
  */
 export async function processPost(post, deps = {}) {
   const extract = deps.extract || extractListings;
   const geocode = deps.geocode || resolveCounty;
   const state = await loadState();
   const now = new Date().toISOString();
+  const out = { rows: [], descartes: [] };
 
-  if (post.id && state.seenMessageIds[post.id]) return [];
+  if (post.id && state.seenMessageIds[post.id]) return out;
 
   const result = await extract(post);
-  const rows = [];
+  if (!result.is_property_listing) return out;
 
-  if (result.is_property_listing) {
-    for (const l of result.listings) {
-      const geo = await geocode(l);
-      const key = addressKey(l, geo);
-      let first = key ? state.addresses[key] : null;
-      if (key && !first) state.addresses[key] = { at: post.timestamp, group: post.groupName, id: post.id };
-      if (first && first.id === post.id) first = null; // reintento del mismo mensaje, no es duplicado
-
-      rows.push({
-        fecha_mensaje: post.timestamp,
-        grupo: post.groupName,
-        autor: post.sender,
-        condado: geo.county,
-        en_zona: zoneFlag(geo.county, geo.ambiguous),
-        estado_direccion: ADDRESS_STATUS[l.address_status],
-        direccion: l.street_address,
-        ciudad: l.city,
-        zip: l.zip || geo.zip,
-        direccion_verificada: geo.matchedAddress,
-        metodo_condado: geo.method,
-        precio_usd: l.price_usd,
-        arv_usd: l.arv_usd,
-        beds: l.beds,
-        baths: l.baths,
-        sqft: l.sqft,
-        lote_sqft: l.lot_sqft,
-        anio: l.year_built,
-        tipo: l.property_type,
-        tipo_negocio: l.deal_type,
-        condicion: l.condition,
-        contacto: l.contact_name,
-        telefono: l.contact_phone,
-        email: l.contact_email,
-        links_fotos: l.photo_links,
-        links_portales: l.portal_links,
-        resumen: l.summary,
-        texto_ocr: result.ocr_text || '',
-        duplicado: first ? `SI (visto ${first.at} en ${first.group})` : 'NO',
-        mensaje_original: post.text,
-        imagenes_locales: (post.images || []).map((i) => i.path),
-        id_mensaje: post.id,
-        procesado_en: now,
-      });
+  for (const l of result.listings) {
+    const geo = await geocode(l);
+    const decision = classify(l, geo);
+    if (decision.descartar) {
+      out.descartes.push({ motivo: decision.descartar, direccion: l.street_address, ciudad: l.city });
+      continue;
     }
+
+    const key = addressKey(l, geo);
+    let first = key ? state.addresses[key] : null;
+    if (key && !first) state.addresses[key] = { at: post.timestamp, group: post.groupName, id: post.id };
+    if (first && first.id === post.id) first = null; // reintento del mismo mensaje, no es duplicado
+
+    out.rows.push({
+      estado: decision.estado,
+      alerta: decision.alerta || '',
+      fecha_mensaje: post.timestamp,
+      grupo: post.groupName,
+      autor: post.sender,
+      condado: geo.county,
+      estado_direccion: ADDRESS_STATUS[l.address_status],
+      direccion: l.street_address,
+      ciudad: l.city,
+      zip: l.zip || geo.zip,
+      direccion_verificada: geo.matchedAddress,
+      metodo_condado: geo.method,
+      precio_usd: l.price_usd,
+      arv_usd: l.arv_usd,
+      beds: l.beds,
+      baths: l.baths,
+      sqft: l.sqft,
+      lote_sqft: l.lot_sqft,
+      anio: l.year_built,
+      tipo: l.property_type,
+      tipo_negocio: l.deal_type,
+      condicion: l.condition,
+      contacto: l.contact_name,
+      telefono: l.contact_phone,
+      email: l.contact_email,
+      links_fotos: l.photo_links,
+      links_portales: l.portal_links,
+      resumen: l.summary,
+      texto_ocr: result.ocr_text || '',
+      duplicado: first ? `SI (visto ${first.at} en ${first.group})` : 'NO',
+      mensaje_original: post.text,
+      imagenes_locales: (post.images || []).map((i) => i.path),
+      id_mensaje: post.id,
+      clave_direccion: key,
+      procesado_en: now,
+    });
   }
 
-  return rows;
+  return out;
+}
+
+/**
+ * Valida una dirección que el usuario obtuvo del wholesaler.
+ * enZona: true (condado objetivo) | false (otro condado) | null (no se pudo determinar)
+ */
+export async function resolveManualAddress({ calle, ciudad, zip }, deps = {}) {
+  const geocode = deps.geocode || resolveCounty;
+  const clean = (v) => String(v ?? '').trim() || null;
+  const listing = { street_address: clean(calle), city: clean(ciudad), zip: clean(zip), state: 'FL' };
+  if (!listing.street_address) throw Object.assign(new Error('La dirección debe incluir número y calle'), { status: 400 });
+  const geo = await geocode(listing);
+  const enZona = !geo.county || geo.ambiguous ? null : inTargetCounty(geo.county);
+  return { listing, geo, key: addressKey(listing, geo), enZona };
 }
