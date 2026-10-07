@@ -258,3 +258,30 @@ test('acciones: agregar dirección a un lead con ARV', async () => {
   await assert.rejects(actions.agregarDireccion(p3.id, { calle: '' }, 'Jaime', geo('Broward')), /número y calle/);
   assert.equal((await leadsMod.listLeads()).find((l) => l.id === p3.id).estado, ESTADOS.pendienteDireccion);
 });
+
+test('extracción: ignora comps y ventas, y la calle no cruza líneas', async () => {
+  const text = [
+    'N F St, Lake Worth, FL 33460', '', 'Asking: $325,000', 'ARV: $485,000+', '',
+    'Comps', '211 N A St, Lake Worth, FL 33460', '$485,000', '', '1025 N H St Lake Worth, FL 33460', '$485,000',
+  ].join('\n');
+  const r = await extractListings({ text, images: [] }, { ocr: false });
+  assert.equal(r.listings.length, 1);
+  assert.equal(r.listings[0].street_address, null);
+  assert.equal(r.listings[0].arv_usd, 485000);
+
+  const t2 = '5088 2nd Rd, Lake Worth, FL 33467\nASKING: $479,900\nComps:\n5587 3rd Rd — SOLD: $699,000\nTerms: Cash';
+  const r2 = await extractListings({ text: t2, images: [] }, { ocr: false });
+  assert.deepEqual(r2.listings.map((l) => l.street_address), ['5088 2nd Rd']);
+
+  const t3 = 'ASKING: $389,900\n* 2255 NW 96th St — SOLD: $540,000\n1951 NE 59th Place, Fort Lauderdale, FL 33308';
+  const r3 = await extractListings({ text: t3, images: [] }, { ocr: false });
+  assert.deepEqual(r3.listings.map((l) => l.street_address), ['1951 NE 59th Place']);
+});
+
+test('extracción: varias propiedades guardan solo su bloque', async () => {
+  const text = '1951 NE 59th Place, Fort Lauderdale, FL 33308\nASKING: $650,000\n\n5088 2nd Rd, Lake Worth, FL 33467\nASKING: $479,900';
+  const r = await extractListings({ text, images: [] }, { ocr: false });
+  assert.equal(r.listings.length, 2);
+  assert.doesNotMatch(r.listings[0].segment, /5088/);
+  assert.match(r.listings[1].segment, /^5088 2nd Rd/);
+});

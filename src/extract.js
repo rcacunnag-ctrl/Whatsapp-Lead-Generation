@@ -14,11 +14,17 @@ const SUFFIXES = [
 ].join('|');
 const UNIT = String.raw`(?:\s*,?\s*(?:Unit|Apt|Apartment|Suite|Ste|#)\s*#?\s*[\w-]+)?`;
 // número + (dirección cardinal) + 0-4 palabras + sufijo (+ cardinal) | rutas como A1A / US-1 / US Hwy 1
+// Los espacios son [ \t] (no \s): una calle no cruza saltos de línea. El número no puede venir pegado a
+// un precio u otro número ("$485,000\n1025 N H St" no debe dar "000 1025 N H St").
 const STREET_RE = new RegExp(
-  String.raw`\b(\d{1,6}[A-Za-z]?)\s+((?:(?:${DIRS})\.?\s+)?(?:[A-Za-z0-9'.-]+\s+){0,4}?(?:${SUFFIXES})\.?(?:\s+(?:${DIRS})\.?(?![A-Za-z]))?` +
-  String.raw`|(?:(?:${DIRS})\.?\s+)?(?:A1A|US[- ]?(?:Hwy|Highway)?\s?1|(?:State Road|SR|US Highway|US Hwy|Federal Hwy|Dixie Hwy)\s?\d{0,3}))\b${UNIT}`,
+  String.raw`(?<![\d$,.])\b(\d{1,6}[A-Za-z]?)[ \t]+((?:(?:${DIRS})\.?[ \t]+)?(?:[A-Za-z0-9'.-]+[ \t]+){0,4}?(?:${SUFFIXES})\.?(?:[ \t]+(?:${DIRS})\.?(?![A-Za-z]))?` +
+  String.raw`|(?:(?:${DIRS})\.?[ \t]+)?(?:A1A|US[- ]?(?:Hwy|Highway)?[ \t]?1|(?:State Road|SR|US Highway|US Hwy|Federal Hwy|Dixie Hwy)[ \t]?\d{0,3}))\b${UNIT}`,
   'gi',
 );
+// Secciones de comparables: desde una línea "Comps" hasta "Terms"/"Photos" o el final. Sus direcciones no son la propiedad.
+const COMPS_START_RE = /^[\s*•#-]*(?:comps?|comparables?|comparable\s+sales|sold\s+comps?)\b.*$/gim;
+const COMPS_END_RE = /^[\s*•#-]*(?:terms?|t[eé]rminos|photos?|fotos|contact(?:o)?|asking|price|precio)\b/im;
+const SOLD_LINE_RE = /\b(?:sold|vendid[ao])\b/i;
 // Palabras que indican que el "número + palabras" no es una calle (p. ej. "2 family home on quiet street").
 const STREET_STOPWORDS = /\b(bed|beds|bd|br|bath|baths|ba|car|garage|home|house|family|story|stories|units?|acres?|years?|with|on|the|and|for|in|of|to|near|close|from|quiet|corner|hab|baños|banos|casa|en|de|la|el|y|con|days?|min|minutes|blocks?|miles?)\b/i;
 
@@ -185,9 +191,25 @@ function findZip(text, { strict = true } = {}) {
 const titleCase = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
 
 /** Encuentra direcciones de calle con su ciudad/ZIP cercanos. */
+/** Rangos [inicio, fin) del texto que son secciones de comparables. */
+function compsRanges(text) {
+  const ranges = [];
+  for (const m of text.matchAll(COMPS_START_RE)) {
+    const from = m.index + m[0].length;
+    const end = COMPS_END_RE.exec(text.slice(from));
+    ranges.push([m.index, end ? from + end.index : text.length]);
+  }
+  return ranges;
+}
+
 export function findAddresses(text) {
   const out = [];
+  const comps = compsRanges(text);
   for (const m of text.matchAll(STREET_RE)) {
+    if (comps.some(([a, b]) => m.index >= a && m.index < b)) continue;
+    const lineEnd = text.indexOf('\n', m.index);
+    const line = text.slice(text.lastIndexOf('\n', m.index) + 1, lineEnd < 0 ? undefined : lineEnd);
+    if (SOLD_LINE_RE.test(line)) continue; // comparable vendido
     const street = m[0].replace(/\s+/g, ' ').trim();
     const nameWords = m[2] || '';
     if (STREET_STOPWORDS.test(nameWords)) continue;
@@ -271,6 +293,7 @@ function buildListing(segment, address, whole, { multi = false } = {}) {
     photo_links: links.photo.length ? links.photo : findLinks(whole).photo,
     portal_links: [...links.portal, ...links.other],
     summary: parts.join(' '),
+    segment: multi ? segment.trim() : null,
   };
 }
 

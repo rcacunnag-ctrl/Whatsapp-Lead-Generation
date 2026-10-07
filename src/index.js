@@ -42,10 +42,12 @@ async function onMessages(sock, messages) {
     const data = await readMessage(sock, msg);
     if (!data) continue;
 
-    // Agrupa texto + fotos consecutivas del mismo autor en una sola publicación.
+    // Agrupa con las fotos consecutivas del mismo autor, pero cada mensaje con texto es una publicación
+    // propia: un wholesaler que pega varios anuncios seguidos no debe generar una sola publicación mezclada.
     const sender = msg.pushName || msg.key.participant || 'desconocido';
     const key = `${jid}|${msg.key.participant || sender}`;
     const ts = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
+    if (data.text && pending.get(key)?.text) await flush(key);
     const post = pending.get(key) || {
       id: msg.key.id, timestamp: ts, groupJid: jid, groupName: selected.get(jid),
       sender, text: '', images: [], messageIds: [],

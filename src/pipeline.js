@@ -87,7 +87,7 @@ export async function processPost(post, deps = {}) {
       resumen: l.summary,
       texto_ocr: result.ocr_text || '',
       duplicado: first ? `SI (visto ${first.at} en ${first.group})` : 'NO',
-      mensaje_original: post.text,
+      mensaje_original: l.segment || post.text, // con varias propiedades, solo el bloque de esta
       imagenes_locales: (post.images || []).map((i) => i.path),
       id_mensaje: post.id,
       clave_direccion: key,
