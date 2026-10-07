@@ -2,7 +2,7 @@
 import { config } from './config.js';
 import { ESTADOS, listLeads, updateLead, discardLead } from './leads.js';
 import { resolveManualAddress } from './pipeline.js';
-import { lanzarCompAnalysis } from './tier1.js';
+import { lanzarCompAnalysis, setJobState } from './tier1.js';
 import { exportOutputs } from './sink.js';
 
 const badRequest = (msg) => Object.assign(new Error(msg), { status: 400 });
@@ -30,8 +30,19 @@ export async function pasarATier1(id, usuario) {
   if (lead.estado === ESTADOS.tier1) throw badRequest('El lead ya está en Tier 1');
   const updated = await updateLead(id, { estado: ESTADOS.tier1, alerta: '', tier1_usuario: usuario, tier1_en: new Date().toISOString() });
   const skill = await lanzarCompAnalysis(updated, usuario);
+  if (skill.lanzado) await updateLead(id, { informe_estado: skill.estado, informe_en: new Date().toISOString() });
   await exportOutputs();
   return { ok: true, resultado: 'tier1', skill };
+}
+
+/** El PC que ejecuta el skill reporta el avance de la orden; se refleja en el lead (si sigue activo). */
+export async function reportarInforme(id, body) {
+  const job = await setJobState(id, body);
+  if ((await listLeads()).some((l) => l.id === id)) {
+    await updateLead(id, { informe_estado: job.estado, informe_ruta: job.ruta || '', informe_detalle: job.detalle || '', informe_en: job.actualizado_en });
+    await exportOutputs();
+  }
+  return { ok: true, orden: job };
 }
 
 /**

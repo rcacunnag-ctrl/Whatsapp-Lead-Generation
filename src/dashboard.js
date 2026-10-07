@@ -8,7 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { exportXlsx } from './sink.js';
 import { listLeads } from './leads.js';
-import { descartar, pasarATier1, agregarDireccion } from './actions.js';
+import { descartar, pasarATier1, agregarDireccion, reportarInforme } from './actions.js';
+import { listJobs } from './tier1.js';
 import { migrateLegacy } from './migrate.js';
 import { PAGE } from './page.js';
 
@@ -23,9 +24,11 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
     try {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'POST') {
+        checkSameOrigin(req);
+        const job = url.pathname.match(/^\/api\/tier1-jobs\/([\w-]+)\/estado$/);
+        if (job) return send(res, 200, 'application/json', JSON.stringify(await reportarInforme(job[1], await readJson(req))));
         const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion)$/);
         if (!m) return send(res, 404, 'text/plain', 'No encontrado');
-        checkSameOrigin(req);
         const out = await ACTIONS[m[2]](m[1], await readJson(req));
         return send(res, 200, 'application/json', JSON.stringify(out));
       }
@@ -33,6 +36,9 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
       if (url.pathname === '/api/leads') {
         const body = { leads: await listLeads(), usuarios: config.tier1Users, skillHabilitado: config.tier1SkillEnabled };
         return send(res, 200, 'application/json', JSON.stringify(body));
+      }
+      if (url.pathname === '/api/tier1-jobs') {
+        return send(res, 200, 'application/json', JSON.stringify(await listJobs({ estado: url.searchParams.get('estado') || undefined })));
       }
       if (url.pathname === '/descargar/csv') {
         const data = await fs.readFile(config.csvFile).catch(() => Buffer.from(''));

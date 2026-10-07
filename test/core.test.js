@@ -313,3 +313,22 @@ test('vista de solo lectura: solo con el código, sin acciones', async () => {
     server.close();
   }
 });
+
+test('órdenes Tier 1: pendiente -> en proceso -> listo, reflejado en el lead', async () => {
+  const { lanzarCompAnalysis, listJobs } = await import('../src/tier1.js');
+  const [lead] = await leadsMod.addLeads([{ estado: ESTADOS.tier1, direccion: '1951 NE 59th Place', ciudad: 'Fort Lauderdale', zip: '33308' }]);
+  const r = await lanzarCompAnalysis(lead, 'Carlos', { enabled: true });
+  assert.equal(r.lanzado, true);
+  const [job] = (await listJobs({ estado: 'pendiente' })).filter((j) => j.id === lead.id);
+  assert.equal(job.lead.direccion, '1951 NE 59th Place, Fort Lauderdale, FL 33308');
+  assert.equal(job.usuario, 'Carlos');
+
+  await actions.reportarInforme(lead.id, { estado: 'en_proceso' });
+  assert.equal((await listJobs({ estado: 'pendiente' })).filter((j) => j.id === lead.id).length, 0);
+  await actions.reportarInforme(lead.id, { estado: 'listo', ruta: 'C:/Leads/Informes Tier 1' });
+  const updated = (await leadsMod.listLeads()).find((l) => l.id === lead.id);
+  assert.equal(updated.informe_estado, 'listo');
+  assert.match(updated.informe_ruta, /Informes Tier 1/);
+  await assert.rejects(actions.reportarInforme(lead.id, { estado: 'otro' }), /Estado no válido/);
+  await assert.rejects(actions.reportarInforme('no-existe', { estado: 'listo' }), /no encontrada/);
+});
