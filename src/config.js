@@ -23,6 +23,9 @@ export const config = {
   // Panel local
   dashboardPort: Number(process.env.DASHBOARD_PORT || 3000),
   dashboardHost: process.env.DASHBOARD_HOST || '127.0.0.1',
+  // Vista de solo lectura para terceros (vacío = desactivada). Se sirve en /v/<token>/
+  vistaToken: (process.env.VISTA_TOKEN || '').trim(),
+  vistaPort: Number(process.env.VISTA_PORT || 3001),
 
   targetCounties: list(process.env.TARGET_COUNTIES || 'Palm Beach,Broward,Martin'),
 
@@ -36,6 +39,7 @@ export const config = {
     failed: path.join(DATA_DIR, 'failed'),
     media: path.join(DATA_DIR, 'media'),
     tier1Jobs: path.join(DATA_DIR, 'tier1-jobs'),
+    vista: path.join(DATA_DIR, 'vista'),
   },
   leadsFile: path.join(DATA_DIR, 'leads.json'),
   stateFile: path.join(DATA_DIR, 'state.json'),

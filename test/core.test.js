@@ -6,6 +6,7 @@ import path from 'node:path';
 
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'wapm-'));
 process.env.USE_CENSUS_GEOCODER = 'false';
+process.env.VISTA_TOKEN = 'tok-de-prueba-123';
 
 const { countyFromCity, countyFromZip } = await import('../src/counties.js');
 const { extractListings, parseMoney } = await import('../src/extract.js');
@@ -284,4 +285,31 @@ test('extracción: varias propiedades guardan solo su bloque', async () => {
   assert.equal(r.listings.length, 2);
   assert.doesNotMatch(r.listings[0].segment, /5088/);
   assert.match(r.listings[1].segment, /^5088 2nd Rd/);
+});
+
+test('vista de solo lectura: solo con el código, sin acciones', async () => {
+  const { writeVista, startVista } = await import('../src/vista.js');
+  await leadsMod.addLeads([{ estado: ESTADOS.nuevo, direccion: '77 Vista St', mensaje_original: 'texto completo', imagenes_locales: [] }]);
+  await exportOutputs(); // regenera también la vista
+  assert.ok(await writeVista());
+  const server = startVista({ port: 0, host: '127.0.0.1' });
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const page = await fetch(`${base}/v/tok-de-prueba-123/`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /window\.RO=true/);
+    const datos = await (await fetch(`${base}/v/tok-de-prueba-123/datos.json`)).json();
+    assert.ok(datos.leads.some((l) => l.direccion === '77 Vista St' && l.mensaje_original === 'texto completo'));
+    assert.equal((await fetch(`${base}/v/tok-de-prueba-123/propiedades.csv`)).status, 200);
+    assert.equal((await fetch(`${base}/v/otro-codigo/`)).status, 404);
+    assert.equal((await fetch(`${base}/`)).status, 404);
+    assert.equal((await fetch(`${base}/api/leads`)).status, 404);
+    assert.equal((await fetch(`${base}/v/tok-de-prueba-123/../leads.json`)).status, 404);
+    assert.equal((await fetch(`${base}/v/tok-de-prueba-123/media/..%2Fleads.json`)).status, 404);
+    assert.equal((await fetch(`${base}/v/tok-de-prueba-123/`, { method: 'POST' })).status, 404);
+  } finally {
+    server.close();
+  }
 });

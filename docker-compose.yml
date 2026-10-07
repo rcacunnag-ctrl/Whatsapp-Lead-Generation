@@ -7,6 +7,7 @@ services:
       DASHBOARD_HOST: 0.0.0.0   # dentro del contenedor; el puerto se publica solo en localhost abajo
     ports:
       - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3001"   # vista de solo lectura (se publica con Tailscale Funnel)
     volumes:
       - ./data:/app/data
       - ./auth:/app/auth

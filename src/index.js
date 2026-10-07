@@ -4,6 +4,7 @@ import { enqueuePost, ensureDirs, loadState } from './store.js';
 import { processInbox } from './process-inbox.js';
 import { startDashboard } from './dashboard.js';
 import { migrateLegacy } from './migrate.js';
+import { writeVista, startVista } from './vista.js';
 
 const listOnly = process.argv.includes('--list-groups');
 let selected = new Map();
@@ -15,6 +16,8 @@ await ensureDirs();
 if (!listOnly) {
   await migrateLegacy();
   startDashboard();
+  await writeVista();
+  startVista();
 }
 
 async function flush(key, { process: run = true } = {}) {

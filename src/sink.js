@@ -4,6 +4,7 @@ import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { config } from './config.js';
 import { listLeads } from './leads.js';
+import { writeVista } from './vista.js';
 
 export const COLUMNS = [
   'estado', 'alerta', 'tier1_usuario', 'tier1_en', 'fecha_mensaje', 'grupo', 'autor', 'condado',
@@ -26,8 +27,14 @@ export async function readLegacyRows() {
   }
 }
 
-/** Reescribe propiedades.csv y propiedades.xlsx con los leads activos. */
+/** Reescribe propiedades.csv, propiedades.xlsx y la vista de solo lectura con los leads activos. */
 export async function exportOutputs() {
+  const file = await exportCsvXlsx();
+  await writeVista().catch((err) => console.warn(`No se pudo actualizar la vista de solo lectura: ${err.message}`));
+  return file;
+}
+
+async function exportCsvXlsx() {
   const rows = await listLeads();
   await fs.mkdir(path.dirname(config.csvFile), { recursive: true });
   const lines = [csvLine(COLUMNS), ...rows.map((r) => csvLine(COLUMNS.map((c) => toCell(r[c]))))];
