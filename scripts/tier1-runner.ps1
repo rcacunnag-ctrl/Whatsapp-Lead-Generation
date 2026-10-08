@@ -8,7 +8,10 @@ param(
   [string]$LeadsRoot = (Join-Path $env:USERPROFILE 'OneDrive\Documents\4. Ejecucion de procesos\1. Underwriting')
 )
 $ErrorActionPreference = 'Stop'
-$dir = Join-Path $env:LOCALAPPDATA 'MonitorTier1'
+# La salida de `claude` es UTF-8: sin esto, "Acuña" o "—" llegan deformados al panel ("Acu├▒a").
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$OutputEncoding = [Text.Encoding]::UTF8
+$dir =Join-Path $env:LOCALAPPDATA 'MonitorTier1'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $log = Join-Path $dir ('tier1-{0:yyyy-MM}.log' -f (Get-Date))
 function Log([string]$m) { Add-Content -LiteralPath $log -Encoding utf8 -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $m) }
