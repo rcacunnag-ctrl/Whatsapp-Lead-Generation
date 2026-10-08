@@ -24,6 +24,7 @@ td img{max-height:60px;border-radius:4px;margin-right:4px}
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);padding:18px;max-width:420px;width:calc(100% - 32px)}
 dialog form{display:flex;flex-direction:column;gap:10px}dialog h2{font-size:16px;margin:0}dialog .row{display:flex;gap:8px;justify-content:flex-end}
 dialog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+#precioFields:not([hidden]){display:grid;grid-template-columns:1fr 1fr;gap:8px}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:calc(100% - 32px)}
 </style></head><body>
 <header><h1>Monitor de Propiedades</h1><div class="kpis" id="kpis"></div></header>
@@ -42,6 +43,10 @@ dialog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var
 <label>Número y calle<input name="calle" placeholder="1234 NW 5th Ave"></label>
 <label>Ciudad<input name="ciudad" placeholder="Fort Lauderdale"></label>
 <label>ZIP<input name="zip" inputmode="numeric" maxlength="5" placeholder="33311"></label>
+</div>
+<div id="precioFields" hidden>
+<label>Precio (asking)<input name="precio_usd" inputmode="decimal" placeholder="325000 o $325k"></label>
+<label>ARV (opcional)<input name="arv_usd" inputmode="decimal" placeholder="480000 o $480k"></label>
 </div>
 <label>Usuario que ejecuta<select name="usuario" id="usuario"></select></label>
 <div class="m" id="skillNote"></div>
@@ -71,7 +76,8 @@ async function load(){if($('dlg').open)return;const d=await (await fetch(RO?'dat
  $('condado').innerHTML='<option value="">Condado: todos</option>'+cs.map(c=>'<option'+(c===cv?' selected':'')+'>'+esc(c)+'</option>').join('');render()}
 function actions(r){if(RO)return '';const b=[];
  if(r.estado==='Pendiente dirección'||r.estado==='Revisar condado')b.push('<button class="ok" data-a="direccion" data-id="'+r.id+'">'+(r.estado==='Revisar condado'?'Corregir dirección':'Agregar dirección')+'</button>');
- if(r.estado==='Nuevo'||r.estado==='Revisar condado')b.push('<button class="ok" data-a="tier1" data-id="'+r.id+'">Tier 1</button>');
+ if((r.estado==='Nuevo'||r.estado==='Revisar condado')&&r.precio_usd)b.push('<button class="ok" data-a="tier1" data-id="'+r.id+'">Tier 1</button>');
+ if(!r.precio_usd)b.push('<button class="ok" data-a="precio" data-id="'+r.id+'">Agregar precio</button>');
  if(r.estado==='Tier 1')b.push('<span class="m">'+esc(r.tier1_usuario||'')+'<br>'+esc((r.tier1_en||'').slice(0,10))+'</span>');
  b.push('<button class="del" data-a="descartar" data-id="'+r.id+'">Descartar</button>');return '<div class="acc">'+b.join('')+'</div>'}
 function render(){const e=$('estado').value,c=$('condado').value,dup=$('dup').value,q=$('q').value.toLowerCase();
@@ -80,14 +86,19 @@ function render(){const e=$('estado').value,c=$('condado').value,dup=$('dup').va
  $('rows').innerHTML=f.map(r=>'<tr><td><span class="e '+esc(cls(r.estado))+'">'+esc(r.estado)+'</span>'+informe(r)+'</td><td class="m">'+esc((r.fecha_mensaje||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(r.condado||'—')+'<div class="m">'+esc(r.metodo_condado||'')+'</div></td><td>'+esc(fullAddr(r))+'<div class="m">'+esc(r.estado_direccion)+'</div>'+(r.duplicado&&r.duplicado!=='NO'?'<div class="m">Duplicado</div>':'')+(r.alerta?'<div class="alerta">⚠ '+esc(r.alerta)+(r.contacto||r.telefono?': '+esc(r.contacto||r.autor||'')+' '+(r.telefono?'<a href="tel:'+esc(r.telefono)+'">'+esc(r.telefono)+'</a>':''):'')+'</div>':'')+'</td><td>'+money(r.precio_usd)+(r.arv_usd?'<div class="m">ARV '+money(r.arv_usd)+'</div>':'')+'</td><td>'+esc([r.beds,r.baths].some(x=>x!=null&&x!=='')?(r.beds??'?')+'/'+(r.baths??'?'):'')+'<div class="m">'+esc(r.sqft?r.sqft+' sqft':'')+'</div></td><td>'+esc(r.tipo)+'<div class="m">'+esc(r.tipo_negocio)+'</div></td><td>'+esc(r.contacto||'')+'<div class="m">'+esc(r.telefono||'')+'</div></td><td class="m">'+esc(r.grupo)+'<br>'+esc(r.autor)+'</td><td><details><summary>'+esc(r.resumen)+'</summary><pre>'+esc(r.mensaje_original)+'</pre>'+(r.imagenes_locales||[]).map(p=>'<img src="'+MEDIA+encodeURIComponent(String(p).split(/[\\\\/]/).pop())+'">').join('')+' '+links(r.links_fotos)+' '+links(r.links_portales)+'</details></td>'+(RO?'':'<td>'+actions(r)+'</td>')+'</tr>').join('')||'<tr><td colspan="11" class="m">Sin resultados</td></tr>'}
 async function post(id,a,body){const res=await fetch('/api/leads/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json','X-Monitor':'1'},body:JSON.stringify(body||{})});
  const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(d.error||'Error '+res.status);return d}
-function openDlg(a,r){current={a,id:r.id};const dir=a==='direccion';$('dirFields').hidden=!dir;
- $('frm').calle.value=dir&&r.estado==='Revisar condado'?(r.direccion||''):'';$('frm').ciudad.value=dir?(r.ciudad||''):'';$('frm').zip.value=dir?(r.zip||''):'';$('frm').calle.required=dir;
- $('dlgTitle').textContent=dir?'Dirección del wholesaler':'Pasar a Tier 1';
- $('dlgInfo').textContent=dir?'Si está en Broward, Palm Beach o Martin pasa a Tier 1; si no, se descarta.':(r.direccion||'')+' '+(r.ciudad||'');
- $('skillNote').textContent='Lanzar comp-analysis-report: '+(skillOn?'se enviará al PC del usuario elegido.':'por habilitar.');
- $('dlgOk').textContent=dir?'Validar y continuar':'Pasar a Tier 1';$('dlg').showModal()}
-$('dlg').addEventListener('close',async()=>{if($('dlg').returnValue!=='ok'||!current)return;const fd=Object.fromEntries(new FormData($('frm')));localStorage.setItem('usuario',fd.usuario);
- try{const d=await post(current.id,current.a,fd);toast(d.resultado==='descartado'?'Descartado: fuera de condado ('+(d.condado||'?')+')':'Lead en Tier 1'+(d.condado?' ('+d.condado+')':''))}catch(e){toast(e.message)}current=null;load()});
+// Muestra un grupo de campos; los ocultos se deshabilitan para que no viajen en el formulario.
+function show(id,on){$(id).hidden=!on;$(id).querySelectorAll('input,select').forEach(i=>i.disabled=!on)}
+function openDlg(a,r){current={a,id:r.id};const f=$('frm'),dir=a==='direccion',pre=a==='precio',t1=a==='tier1';
+ show('dirFields',dir);show('precioFields',pre);
+ f.calle.value=dir&&r.estado==='Revisar condado'?(r.direccion||''):'';f.ciudad.value=dir?(r.ciudad||''):'';f.zip.value=dir?(r.zip||''):'';f.calle.required=dir;
+ f.precio_usd.value=r.precio_usd??'';f.arv_usd.value=r.arv_usd??'';f.precio_usd.required=pre;
+ $('dlgTitle').textContent={direccion:'Dirección del wholesaler',tier1:'Pasar a Tier 1',precio:'Precio del wholesaler'}[a];
+ $('dlgInfo').textContent=dir?'Si está en Broward, Palm Beach o Martin pasa a Tier 1 (si falta el precio, queda como Nuevo hasta agregarlo); si no, se descarta.':fullAddr(r);
+ $('skillNote').textContent=t1||dir?'Lanzar comp-analysis-report: '+(skillOn?'se enviará al PC del usuario elegido.':'por habilitar.'):'Queda registrado quién agregó el precio.';
+ $('dlgOk').textContent={direccion:'Validar y continuar',tier1:'Pasar a Tier 1',precio:'Guardar precio'}[a];$('dlg').showModal()}
+// Se guarda en el envío del formulario (no en el evento close del diálogo, que no siempre se dispara).
+$('frm').addEventListener('submit',async ev=>{if(ev.submitter?.value!=='ok'||!current)return;const fd=Object.fromEntries(new FormData($('frm')));localStorage.setItem('usuario',fd.usuario);
+ try{const d=await post(current.id,current.a,fd);toast(d.resultado==='descartado'?'Descartado: fuera de condado ('+(d.condado||'?')+')':d.resultado==='precio'?'Precio guardado':d.resultado==='falta_precio'?'Dirección guardada ('+(d.condado||'')+'). Falta el precio para pasar a Tier 1':'Lead en Tier 1'+(d.condado?' ('+d.condado+')':''))}catch(e){toast(e.message)}current=null;load()});
 document.addEventListener('click',async ev=>{const k=ev.target.closest('.kpi');if(k){$('estado').value=k.dataset.e;render();return}
  const b=ev.target.closest('button[data-a]');if(!b)return;const r=all.find(x=>x.id===b.dataset.id);if(!r)return;
  if(b.dataset.a==='descartar'){if(!confirm('¿Descartar este lead? Se borra y la dirección no volverá a entrar.'))return;try{await post(r.id,'descartar');toast('Lead descartado')}catch(e){toast(e.message)}return load()}

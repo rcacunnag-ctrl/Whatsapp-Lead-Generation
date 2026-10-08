@@ -7,6 +7,14 @@ import { ESTADOS } from './leads.js';
 const ADDRESS_STATUS = { complete: 'COMPLETA', partial: 'PARCIAL', missing: 'SIN DIRECCION' };
 export const ALERTA_DIRECCION = 'Solicitar dirección al wholesaler';
 
+/** Alerta del lead según lo que falta pedirle al wholesaler: dirección (Pendiente dirección) y/o precio. */
+export function computeAlerta(lead) {
+  const falta = [];
+  if (lead.estado === ESTADOS.pendienteDireccion) falta.push('dirección');
+  if (!lead.precio_usd) falta.push('precio');
+  return falta.length ? `Solicitar ${falta.join(' y ')} al wholesaler` : '';
+}
+
 export function inTargetCounty(county) {
   return Boolean(county) && config.targetCounties.some((t) => t.toLowerCase() === county.toLowerCase());
 }
@@ -58,7 +66,7 @@ export async function processPost(post, deps = {}) {
 
     out.rows.push({
       estado: decision.estado,
-      alerta: decision.alerta || '',
+      alerta: computeAlerta({ estado: decision.estado, precio_usd: l.price_usd }),
       fecha_mensaje: post.timestamp,
       grupo: post.groupName,
       autor: post.sender,

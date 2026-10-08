@@ -1,4 +1,4 @@
-// Panel local (navegador): leads filtrables, acciones (Tier 1, descartar, agregar dirección) y descarga de Excel/CSV.
+// Panel local (navegador): leads filtrables, acciones (Tier 1, descartar, agregar dirección, agregar precio) y descarga de Excel/CSV.
 // Sin dependencias externas. No tiene login: el acceso se limita por red (localhost o Tailscale).
 import http from 'node:http';
 import fs from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { exportXlsx } from './sink.js';
 import { listLeads } from './leads.js';
-import { descartar, pasarATier1, agregarDireccion, reportarInforme } from './actions.js';
+import { descartar, pasarATier1, agregarDireccion, agregarPrecio, reportarInforme } from './actions.js';
 import { listJobs } from './tier1.js';
 import { migrateLegacy } from './migrate.js';
 import { PAGE } from './page.js';
@@ -17,6 +17,7 @@ const ACTIONS = {
   descartar: (id) => descartar(id),
   tier1: (id, body) => pasarATier1(id, body.usuario),
   direccion: (id, body) => agregarDireccion(id, body, body.usuario),
+  precio: (id, body) => agregarPrecio(id, body, body.usuario),
 };
 
 export function startDashboard({ port = config.dashboardPort, host = config.dashboardHost } = {}) {
@@ -27,7 +28,7 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
         checkSameOrigin(req);
         const job = url.pathname.match(/^\/api\/tier1-jobs\/([\w-]+)\/estado$/);
         if (job) return send(res, 200, 'application/json', JSON.stringify(await reportarInforme(job[1], await readJson(req))));
-        const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion)$/);
+        const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion|precio)$/);
         if (!m) return send(res, 404, 'text/plain', 'No encontrado');
         const out = await ACTIONS[m[2]](m[1], await readJson(req));
         return send(res, 200, 'application/json', JSON.stringify(out));

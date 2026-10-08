@@ -11,6 +11,22 @@ export const ESTADOS_ORDEN = ['pendiente', 'en_proceso', 'listo', 'error'];
 
 const jobFile = (id) => path.join(config.dirs.tier1Jobs, `${path.basename(id)}.json`);
 
+/** Datos del lead que viajan en la orden. Formato de carpeta de los skills: "<número calle>, <Ciudad>, FL <zip>" */
+const jobLead = (lead) => ({
+  id: lead.id,
+  direccion: [lead.direccion, lead.ciudad, `FL ${lead.zip || ''}`.trim()].filter(Boolean).join(', '),
+  condado: lead.condado,
+  precio_usd: lead.precio_usd,
+  arv_usd: lead.arv_usd,
+  beds: lead.beds,
+  baths: lead.baths,
+  sqft: lead.sqft,
+  tipo: lead.tipo,
+  contacto: lead.contacto,
+  telefono: lead.telefono,
+  mensaje_original: lead.mensaje_original,
+});
+
 export async function lanzarCompAnalysis(lead, usuario, { enabled = config.tier1SkillEnabled } = {}) {
   if (!enabled) return { lanzado: false, motivo: 'por habilitar (TIER1_SKILL_ENABLED=false)' };
   await fs.mkdir(config.dirs.tier1Jobs, { recursive: true });
@@ -22,21 +38,7 @@ export async function lanzarCompAnalysis(lead, usuario, { enabled = config.tier1
     estado: 'pendiente',
     creado_en: now,
     actualizado_en: now,
-    lead: {
-      id: lead.id,
-      // Formato de carpeta de los skills: "<número calle>, <Ciudad>, FL <zip>"
-      direccion: [lead.direccion, lead.ciudad, `FL ${lead.zip || ''}`.trim()].filter(Boolean).join(', '),
-      condado: lead.condado,
-      precio_usd: lead.precio_usd,
-      arv_usd: lead.arv_usd,
-      beds: lead.beds,
-      baths: lead.baths,
-      sqft: lead.sqft,
-      tipo: lead.tipo,
-      contacto: lead.contacto,
-      telefono: lead.telefono,
-      mensaje_original: lead.mensaje_original,
-    },
+    lead: jobLead(lead),
   };
   await fs.writeFile(jobFile(lead.id), JSON.stringify(job, null, 2));
   return { lanzado: true, estado: 'pendiente' };

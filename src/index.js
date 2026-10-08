@@ -4,6 +4,7 @@ import { enqueuePost, ensureDirs, loadState } from './store.js';
 import { processInbox } from './process-inbox.js';
 import { startDashboard } from './dashboard.js';
 import { migrateLegacy } from './migrate.js';
+import { refreshAlertas } from './actions.js';
 import { writeVista, startVista } from './vista.js';
 
 const listOnly = process.argv.includes('--list-groups');
@@ -15,6 +16,7 @@ const groupsReady = new Promise((r) => { markReady = r; }); // los mensajes offl
 await ensureDirs();
 if (!listOnly) {
   await migrateLegacy();
+  await refreshAlertas();
   startDashboard();
   await writeVista();
   startVista();
