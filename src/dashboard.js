@@ -6,12 +6,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
-import { exportXlsx } from './sink.js';
+import { exportXlsx, exportOutputs } from './sink.js';
 import { listLeads } from './leads.js';
 import { descartar, pasarATier1, agregarDireccion, agregarPrecio, reportarInforme, registrarInspeccion, avanzar } from './actions.js';
 import { listJobs } from './tier1.js';
 import { migrateLegacy } from './migrate.js';
 import { PAGE } from './page.js';
+import { guardarInforme, leerInforme, cabecerasInforme, usoDisco } from './informes.js';
 
 const ACTIONS = {
   descartar: (id) => descartar(id),
@@ -28,7 +29,14 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
     try {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'POST') {
-        checkSameOrigin(req);
+        const subida = url.pathname.match(/^\/api\/leads\/([\w-]+)\/informes$/);
+        checkSameOrigin(req, subida ? /^application\/octet-stream/ : /^application\/json/);
+        if (subida) {
+          const params = { tier: url.searchParams.get('tier'), nombre: url.searchParams.get('nombre') };
+          const out = await guardarInforme(subida[1], params, req);
+          await exportOutputs();
+          return send(res, 200, 'application/json', JSON.stringify(out));
+        }
         const job = url.pathname.match(/^\/api\/tier1-jobs\/([\w-]+)\/estado$/);
         if (job) return send(res, 200, 'application/json', JSON.stringify(await reportarInforme(job[1], await readJson(req))));
         const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion|precio|inspeccion|tier2|compra)$/);
@@ -38,7 +46,7 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
       }
       if (url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', PAGE);
       if (url.pathname === '/api/leads') {
-        const body = { leads: await listLeads(), usuarios: config.tier1Users, skillHabilitado: config.tier1SkillEnabled };
+        const body = { leads: await listLeads(), usuarios: config.tier1Users, skillHabilitado: config.tier1SkillEnabled, disco: await usoDisco() };
         return send(res, 200, 'application/json', JSON.stringify(body));
       }
       if (url.pathname === '/api/tier1-jobs') {
@@ -54,6 +62,12 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
         const data = await fs.readFile(tmp);
         await fs.rm(tmp, { force: true });
         return send(res, 200, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data, 'propiedades.xlsx');
+      }
+      const inf = url.pathname.match(/^\/informes\/([\w-]+)\/([^/]+)$/);
+      if (inf) {
+        const r = await leerInforme(inf[1], decodeURIComponent(inf[2]));
+        res.writeHead(200, cabecerasInforme(r));
+        return res.end(r.data);
       }
       if (url.pathname.startsWith('/media/')) {
         const name = path.basename(decodeURIComponent(url.pathname.slice(7)));
@@ -71,11 +85,12 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
 }
 
 /**
- * Las acciones solo se aceptan desde el propio panel: JSON con la cabecera X-Monitor
+ * Las acciones solo se aceptan desde el propio panel o el PC ejecutor: JSON (u octet-stream para subir
+ * informes) con la cabecera X-Monitor
  * (otro sitio no puede enviarla sin preflight CORS, que este servidor no autoriza) y Origin igual al Host.
  */
-function checkSameOrigin(req) {
-  const ok = req.headers['x-monitor'] === '1' && /^application\/json/.test(req.headers['content-type'] || '');
+function checkSameOrigin(req, tipo = /^application\/json/) {
+  const ok = req.headers['x-monitor'] === '1' && tipo.test(req.headers['content-type'] || '');
   const origin = req.headers.origin;
   if (!ok || (origin && new URL(origin).host !== req.headers.host)) {
     throw Object.assign(new Error('Petición no permitida'), { status: 403 });

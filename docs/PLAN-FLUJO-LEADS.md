@@ -86,7 +86,7 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
   - [x] criterios C3 con tope C4;
   - [x] inspección en Tier 1: si se hace, si se ejecutó y la observación, con usuario y fecha;
   - [x] botones "Pasar a Tier 2" y "Pasar a Compra".
-- [ ] **B. Enlaces a informes:** al terminar, el ejecutor del PC sube el dashboard HTML a Oracle. El panel y la vista de solo lectura lo enlazan. El informe se sirve aislado (CSP sandbox) para que no pueda usar la API del panel.
+- [x] **B. Enlaces a informes:** al terminar, el ejecutor del PC sube el dashboard HTML a Oracle. El panel y la vista de solo lectura lo enlazan. El informe se sirve aislado (CSP sandbox) para que no pueda usar la API del panel.
 - [ ] **C. Correos** (Gmail con contraseña de aplicación que el usuario pone en el `.env`):
   - [ ] lead con alerta;
   - [ ] informe Tier 1 terminado;
@@ -105,3 +105,13 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
 - 2026-10-08: regla de precio y edición de datos. Un lead sin precio lleva la alerta "Solicitar precio al wholesaler" (o "dirección y precio"); no bloquea Tier 1, pero el diálogo lo advierte. Botón "Agregar precio" (precio obligatorio, ARV opcional; acepta 325000, 325,000 o $325k) y botón "Editar datos" (precio, ARV, beds, baths, sqft, lote, año, tipo, contacto, teléfono, email). Cada cambio guarda usuario, fecha y campos (`cambios`, últimos 20) y actualiza la orden de Tier 1 si sigue en cola. Las alertas se recalculan al arrancar. Corregido además el guardado de los diálogos del panel: dependía del evento `close` del diálogo, que no siempre se dispara; ahora se guarda en el envío del formulario. Pruebas: 23/23 en Linux.
 - 2026-10-08: ajustes pedidos. "Editar datos" solo existe en leads sin precio (el servidor lo rechaza si ya hay precio). Sin precio no se puede pasar a Tier 1: el botón no aparece y el servidor lo rechaza. Al agregar una dirección en zona a un lead sin precio, queda como Nuevo con la alerta de precio; pasa a Tier 1 cuando se agrega el precio. La alerta de pedir la dirección al wholesaler se mantiene. Pruebas: 23/23 en Linux.
 - 2026-10-08: se quitó "Editar datos" a pedido. Solo queda "Agregar precio" (precio obligatorio, ARV opcional; un ARV vacío conserva el existente) en leads sin precio; con precio el servidor lo rechaza. La ruta de edición general ya no existe. Pruebas: 23/23 en Linux.
+- 2026-10-10: Fase A desplegada (commit 204f480). Pruebas: 25/25 en Linux.
+- 2026-10-10: Fase B, enlaces a informes (`src/informes.js`).
+  - Al terminar un informe, el ejecutor del PC sube el dashboard HTML con `scripts/subir-informe.ps1` (`POST /api/leads/<id>/informes?tier=1|2&nombre=…`, cabecera `X-Monitor: 1`, `application/octet-stream`). El mismo script sirve para Tier 2 y para subidas manuales.
+  - Archivos permitidos: .html, .docx, .pdf y .xlsx, de hasta 40 MB. Se guardan en `data/informes/<id>/`; un archivo con el mismo nombre reemplaza al anterior.
+  - El panel los enlaza en la columna Estado ("📄 T1 · Dashboard"). La vista pública los sirve desde `data/informes`, sin copiarlos.
+  - El HTML se abre con `CSP: sandbox`, en un origen aislado del panel; los .docx y .xlsx se descargan.
+  - Al descartar el lead se borran sus archivos. El panel avisa si el disco pasa del 80 %.
+  - Se subió el informe ya existente de 1500 N Congress Ave (2.1 MB).
+  - Pruebas: 26/26 en Linux. Verificado en el panel por Tailscale y en la vista pública por Funnel (con token 200; con otro token 404).
+  - Respaldos: desde ahora conviene excluir `informes/` (`rsync -a --exclude informes data/ data.bak-…/`), porque los originales están en OneDrive.

@@ -456,3 +456,55 @@ test('Tier 1: inspección, Tier 2 y Compra', async () => {
   const csv = await fs.readFile(path.join(process.env.DATA_DIR, 'propiedades.csv'), 'utf8');
   assert.match(csv, /Techo con filtraciones/);
 });
+
+test('informes: subir, servir aislado, vista pública y borrar al descartar', async () => {
+  const { startDashboard } = await import('../src/dashboard.js');
+  const { startVista } = await import('../src/vista.js');
+  const { guardarInforme } = await import('../src/informes.js');
+  const { Readable } = await import('node:stream');
+  const [lead] = await leadsMod.addLeads([{ estado: ESTADOS.tier1, direccion: '90 Informe St', precio_usd: 100000, arv_usd: 400000 }]);
+  const panel = startDashboard({ port: 0, host: '127.0.0.1' });
+  const vista = startVista({ port: 0, host: '127.0.0.1' });
+  await Promise.all([panel, vista].map((s) => (s.listening ? null : new Promise((r) => s.once('listening', r)))));
+  const base = `http://127.0.0.1:${panel.address().port}`;
+  const vbase = `http://127.0.0.1:${vista.address().port}/v/tok-de-prueba-123`;
+  const subir = (nombre, body, headers = { 'X-Monitor': '1', 'Content-Type': 'application/octet-stream' }, id = lead.id) =>
+    fetch(`${base}/api/leads/${id}/informes?tier=1&nombre=${encodeURIComponent(nombre)}`, { method: 'POST', headers, body });
+  try {
+    assert.equal((await subir('x.html', '<p>hola</p>', { 'Content-Type': 'application/octet-stream' })).status, 403);
+    assert.equal((await subir('x.html', '<p>hola</p>', { 'X-Monitor': '1', 'Content-Type': 'text/html' })).status, 403);
+    assert.equal((await subir('../leads.html', 'x')).status, 400);
+    assert.equal((await subir('virus.exe', 'x')).status, 400);
+    assert.equal((await subir('x.html', 'x', undefined, 'no-existe')).status, 404);
+    const nombre = '1500-N-Congress C-comp-dashboard.html';
+    const up = await subir(nombre, '<h1>Dashboard</h1><script>1</script>');
+    assert.equal(up.status, 200);
+    const l = (await leadsMod.listLeads()).find((x) => x.id === lead.id);
+    assert.deepEqual(l.informes.map((i) => [i.tier, i.nombre]), [[1, nombre]]);
+    await subir(nombre, '<h1>Dashboard v2</h1>'); // mismo nombre reemplaza
+    assert.equal((await leadsMod.listLeads()).find((x) => x.id === lead.id).informes.length, 1);
+
+    const get = await fetch(`${base}/informes/${lead.id}/${encodeURIComponent(nombre)}`);
+    assert.equal(get.status, 200);
+    assert.match(get.headers.get('content-security-policy'), /^sandbox allow-scripts/);
+    assert.equal(await get.text(), '<h1>Dashboard v2</h1>');
+    const pub = await fetch(`${vbase}/informes/${lead.id}/${encodeURIComponent(nombre)}`);
+    assert.equal(pub.status, 200);
+    assert.match(pub.headers.get('content-security-policy'), /sandbox/);
+    assert.equal((await fetch(`http://127.0.0.1:${vista.address().port}/v/otro/informes/${lead.id}/${encodeURIComponent(nombre)}`)).status, 404);
+    assert.equal((await fetch(`${base}/informes/${lead.id}/..%2F..%2Fleads.json`)).status, 400);
+
+    await guardarInforme(lead.id, { tier: 2, nombre: 'Informe_Alertas_90.docx' }, Readable.from([Buffer.from('PK')]));
+    const docx = await fetch(`${base}/informes/${lead.id}/Informe_Alertas_90.docx`);
+    assert.match(docx.headers.get('content-disposition'), /^attachment/);
+    await assert.rejects(guardarInforme(lead.id, { tier: 1, nombre: 'grande.pdf' }, Readable.from([Buffer.alloc(10)]), { maxBytes: 5 }), /supera/);
+    assert.ok((await (await fetch(`${base}/api/leads`)).json()).disco);
+
+    await actions.descartar(lead.id);
+    assert.equal((await fetch(`${base}/informes/${lead.id}/${encodeURIComponent(nombre)}`)).status, 404);
+    await assert.rejects(fs.stat(path.join(process.env.DATA_DIR, 'informes', lead.id)));
+  } finally {
+    panel.close();
+    vista.close();
+  }
+});

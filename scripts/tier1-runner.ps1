@@ -99,6 +99,14 @@ RESULTADO: {"estado":"error","detalle":"<cause in one line>"}
     if ($fin -and $fin.estado -eq 'listo') {
       Set-Estado $job.id @{ estado = 'listo'; ruta = [string]$fin.ruta; detalle = [string]$fin.detalle }
       Log "listo $($job.id) | $($fin.ruta) | $($fin.detalle)"
+      # El dashboard HTML (el más reciente de la carpeta, sin _trabajo) se sube al monitor para enlazarlo en el panel
+      try {
+        $html = Get-ChildItem -LiteralPath ([string]$fin.ruta) -File -Filter '*.html' -ErrorAction Stop | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($html) {
+          & (Join-Path $PSScriptRoot 'subir-informe.ps1') -Api $Api -LeadId $job.id -Tier 1 -Archivo $html.FullName | Out-Null
+          Log "subido $($job.id) | $($html.Name) | $([math]::Round($html.Length / 1MB, 1)) MB"
+        } else { Log "sin dashboard HTML en $($fin.ruta)" }
+      } catch { Log "no se pudo subir el informe de $($job.id): $($_.Exception.Message)" }
     } else {
       $causa = if ($fin) { [string]$fin.detalle } else { 'sin línea RESULTADO; ver log: ' + ($texto.Trim() -replace '\s+', ' ').Substring(0, [math]::Min(300, $texto.Trim().Length)) }
       Set-Estado $job.id @{ estado = 'error'; detalle = $causa }

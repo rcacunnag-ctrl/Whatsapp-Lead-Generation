@@ -30,7 +30,7 @@ dialog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var
 #mapDlg{max-width:760px}#mapDlg iframe{width:100%;height:60vh;border:0;border-radius:8px;margin:10px 0}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:calc(100% - 32px)}
 </style></head><body>
-<header><h1>Monitor de Propiedades</h1></header>
+<header><h1>Monitor de Propiedades</h1><div class="alerta" id="disco" hidden></div></header>
 <nav class="tabs" id="tabs"></nav>
 <div class="bar">
 <select id="estado"></select>
@@ -79,6 +79,10 @@ const margen=r=>r.precio_usd&&r.arv_usd?Math.round((r.arv_usd-r.precio_usd)/r.ar
 const INF={pendiente:'en cola',en_proceso:'generando…',listo:'listo ✓',error:'error'};
 const informe=r=>r.informe_estado?'<div class="m" title="'+esc([r.informe_ruta,r.informe_detalle].filter(Boolean).join(' · '))+'">Informe: '+esc(INF[r.informe_estado]||r.informe_estado)+'</div>':'';
 const fecha=s=>esc(String(s||'').slice(0,10));
+// Enlaces a los informes subidos (el HTML se abre en el navegador; .docx/.xlsx se descargan)
+const ETIQ=[[/\\.html$/i,'Dashboard'],[/Informe_Completo/i,'Comparables (completo)'],[/Ejecutivo/i,'Comparables (ejecutivo)'],[/Alertas/i,'Alertas'],[/Decision/i,'Decisión']];
+const etiqueta=n=>(ETIQ.find(([re])=>re.test(n))||[0,n])[1];
+const archivos=r=>(r.informes||[]).map(i=>'<div><a target="_blank" rel="noopener" href="'+(RO?'':'/')+'informes/'+esc(r.id)+'/'+encodeURIComponent(i.nombre)+'" title="'+esc(i.nombre)+'">📄 T'+i.tier+' · '+esc(etiqueta(i.nombre))+'</a></div>').join('');
 // Lo que pasó con el lead: motivo de No califica, quién lo movió de etapa y la inspección
 function detalle(r){const d=[];
  if(r.estado==='No califica'&&r.criterio)d.push('No califica: '+esc(r.criterio));
@@ -94,6 +98,7 @@ function fillEstado(){const op=TABS[tab];$('estado').hidden=op.length<2;$('estad
 async function load(){if($('dlg').open)return;const d=await (await fetch(RO?'datos.json?t='+Date.now():'/api/leads',{cache:'no-store'})).json();
  if(RO&&d.generado_en)$('upd').textContent='Actualizado: '+new Date(d.generado_en).toLocaleString();
  all=d.leads.slice().reverse();usuarios=d.usuarios||[];skillOn=!!d.skillHabilitado;
+ const dk=d.disco;$('disco').hidden=!(dk&&dk.usado_pct>=80);if(dk)$('disco').textContent='⚠ Disco del servidor al '+dk.usado_pct+' % ('+dk.libre_gb+' GB libres)';
  const prev=store.get('usuario');$('usuario').innerHTML=usuarios.map(u=>'<option'+(u===prev?' selected':'')+'>'+esc(u)+'</option>').join('');
  const cs=[...new Set(all.map(r=>r.condado).filter(Boolean))].sort(),cv=$('condado').value;
  $('condado').innerHTML='<option value="">Condado: todos</option>'+cs.map(c=>'<option'+(c===cv?' selected':'')+'>'+esc(c)+'</option>').join('');render()}
@@ -107,7 +112,7 @@ function actions(r){if(RO)return '';const b=[],btn=(a,t,c)=>'<button class="'+(c
 function render(){const e=$('estado').value,c=$('condado').value,dup=$('dup').value,q=$('q').value.toLowerCase(),en=TABS[tab];
  $('tabs').innerHTML=Object.keys(TABS).map(t=>'<button class="tab'+(t===tab?' on':'')+'" data-tab="'+t+'">'+t+'<b>'+all.filter(r=>TABS[t].includes(r.estado)).length+'</b></button>').join('');
  const f=all.filter(r=>en.includes(r.estado)&&(!e||r.estado===e)&&(!c||r.condado===c)&&(!dup||r.duplicado==='NO')&&(!q||JSON.stringify(r).toLowerCase().includes(q)));
- $('rows').innerHTML=f.map(r=>'<tr><td><span class="e '+esc(cls(r.estado))+'">'+esc(r.estado)+'</span>'+informe(r)+detalle(r)+'</td><td class="m">'+esc((r.fecha_mensaje||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(r.condado||'—')+'<div class="m">'+esc(r.metodo_condado||'')+'</div></td><td>'+esc(fullAddr(r))+(fullAddr(r)!=='—'?'<div><button class="lnk" data-map="'+r.id+'">📍 Ver mapa</button></div>':'')+'<div class="m">'+esc(r.estado_direccion)+'</div>'+(r.duplicado&&r.duplicado!=='NO'?'<div class="m">Duplicado</div>':'')+(r.alerta?'<div class="alerta">⚠ '+esc(r.alerta)+(r.contacto||r.telefono?': '+esc(r.contacto||r.autor||'')+' '+(r.telefono?'<a href="tel:'+esc(r.telefono)+'">'+esc(r.telefono)+'</a>':''):'')+'</div>':'')+'</td><td>'+money(r.precio_usd)+(r.arv_usd?'<div class="m">ARV '+money(r.arv_usd)+'</div>':'')+(margen(r)!==null?'<div class="m">Margen '+margen(r)+'%</div>':'')+'</td><td>'+esc([r.beds,r.baths].some(x=>x!=null&&x!=='')?(r.beds??'?')+'/'+(r.baths??'?'):'')+'<div class="m">'+esc(r.sqft?r.sqft+' sqft':'')+'</div></td><td>'+esc(r.tipo)+'<div class="m">'+esc(r.tipo_negocio)+'</div></td><td>'+esc(r.contacto||'')+'<div class="m">'+esc(r.telefono||'')+'</div></td><td class="m">'+esc(r.grupo)+'<br>'+esc(r.autor)+'</td><td><details><summary>'+esc(r.resumen)+'</summary><pre>'+esc(r.mensaje_original)+'</pre>'+(r.imagenes_locales||[]).map(p=>'<img src="'+MEDIA+encodeURIComponent(String(p).split(/[\\\\/]/).pop())+'">').join('')+' '+links(r.links_fotos)+' '+links(r.links_portales)+'</details></td>'+(RO?'':'<td>'+actions(r)+'</td>')+'</tr>').join('')||'<tr><td colspan="11" class="m">Sin resultados</td></tr>'}
+ $('rows').innerHTML=f.map(r=>'<tr><td><span class="e '+esc(cls(r.estado))+'">'+esc(r.estado)+'</span>'+informe(r)+archivos(r)+detalle(r)+'</td><td class="m">'+esc((r.fecha_mensaje||'').replace('T',' ').slice(0,16))+'</td><td>'+esc(r.condado||'—')+'<div class="m">'+esc(r.metodo_condado||'')+'</div></td><td>'+esc(fullAddr(r))+(fullAddr(r)!=='—'?'<div><button class="lnk" data-map="'+r.id+'">📍 Ver mapa</button></div>':'')+'<div class="m">'+esc(r.estado_direccion)+'</div>'+(r.duplicado&&r.duplicado!=='NO'?'<div class="m">Duplicado</div>':'')+(r.alerta?'<div class="alerta">⚠ '+esc(r.alerta)+(r.contacto||r.telefono?': '+esc(r.contacto||r.autor||'')+' '+(r.telefono?'<a href="tel:'+esc(r.telefono)+'">'+esc(r.telefono)+'</a>':''):'')+'</div>':'')+'</td><td>'+money(r.precio_usd)+(r.arv_usd?'<div class="m">ARV '+money(r.arv_usd)+'</div>':'')+(margen(r)!==null?'<div class="m">Margen '+margen(r)+'%</div>':'')+'</td><td>'+esc([r.beds,r.baths].some(x=>x!=null&&x!=='')?(r.beds??'?')+'/'+(r.baths??'?'):'')+'<div class="m">'+esc(r.sqft?r.sqft+' sqft':'')+'</div></td><td>'+esc(r.tipo)+'<div class="m">'+esc(r.tipo_negocio)+'</div></td><td>'+esc(r.contacto||'')+'<div class="m">'+esc(r.telefono||'')+'</div></td><td class="m">'+esc(r.grupo)+'<br>'+esc(r.autor)+'</td><td><details><summary>'+esc(r.resumen)+'</summary><pre>'+esc(r.mensaje_original)+'</pre>'+(r.imagenes_locales||[]).map(p=>'<img src="'+MEDIA+encodeURIComponent(String(p).split(/[\\\\/]/).pop())+'">').join('')+' '+links(r.links_fotos)+' '+links(r.links_portales)+'</details></td>'+(RO?'':'<td>'+actions(r)+'</td>')+'</tr>').join('')||'<tr><td colspan="11" class="m">Sin resultados</td></tr>'}
 async function post(id,a,body){const res=await fetch('/api/leads/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json','X-Monitor':'1'},body:JSON.stringify(body||{})});
  const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(d.error||'Error '+res.status);return d}
 // Muestra un grupo de campos; los ocultos se deshabilitan para que no viajen en el formulario.

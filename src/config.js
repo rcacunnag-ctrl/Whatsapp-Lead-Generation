@@ -45,6 +45,7 @@ export const config = {
     failed: path.join(DATA_DIR, 'failed'),
     media: path.join(DATA_DIR, 'media'),
     tier1Jobs: path.join(DATA_DIR, 'tier1-jobs'),
+    informes: path.join(DATA_DIR, 'informes'),
     vista: path.join(DATA_DIR, 'vista'),
   },
   leadsFile: path.join(DATA_DIR, 'leads.json'),

@@ -6,6 +6,7 @@ import { resolveManualAddress, computeAlerta, evaluarCriterios } from './pipelin
 import { lanzarCompAnalysis, setJobState } from './tier1.js';
 import { parseMoney } from './extract.js';
 import { exportOutputs } from './sink.js';
+import { borrarInformes } from './informes.js';
 
 const badRequest = (msg) => Object.assign(new Error(msg), { status: 400 });
 /** Usuario que figura cuando los criterios pasan un lead a Tier 1 sin intervención. */
@@ -24,6 +25,7 @@ async function getLead(id) {
 
 export async function descartar(id) {
   await discardLead(id, 'usuario');
+  await borrarInformes(id);
   await exportOutputs();
   return { ok: true, resultado: 'descartado' };
 }

@@ -1,6 +1,7 @@
 // Vista de solo lectura para terceros: copia del panel sin acciones en data/vista/, servida en otro puerto
 // solo bajo /v/<VISTA_TOKEN>/. Se publica a internet con Tailscale Funnel; el panel con acciones sigue
-// accesible solo por Tailscale. Sin VISTA_TOKEN no se genera ni se sirve nada.
+// accesible solo por Tailscale. Los informes se sirven directo desde data/informes (sin copiarlos).
+// Sin VISTA_TOKEN no se genera ni se sirve nada.
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { listLeads } from './leads.js';
 import { PAGE } from './page.js';
+import { leerInforme, cabecerasInforme } from './informes.js';
 
 const FILES = {
   '': ['index.html', 'text/html; charset=utf-8'],
@@ -56,6 +58,13 @@ export function startVista({ port = config.vistaPort, host = config.dashboardHos
       const rest = url.pathname.slice(prefix.length);
       if (rest === '') return res.writeHead(301, { ...headers, Location: `${prefix}/` }).end();
       const name = decodeURIComponent(rest.replace(/^\//, ''));
+      const inf = name.match(/^informes\/([\w-]+)\/([^/]+)$/);
+      if (inf) {
+        if (!(await listLeads()).some((l) => l.id === inf[1])) throw notFound();
+        const r = await leerInforme(inf[1], inf[2]);
+        res.writeHead(200, { ...headers, ...cabecerasInforme(r) });
+        return res.end(r.data);
+      }
       let file;
       let type;
       if (FILES[name]) [file, type] = FILES[name];
