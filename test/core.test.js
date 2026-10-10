@@ -508,3 +508,45 @@ test('informes: subir, servir aislado, vista pública y borrar al descartar', as
     vista.close();
   }
 });
+
+test('avisos por WhatsApp: resumen cada 2 h, en horario, solo novedades vigentes', async () => {
+  const { config } = await import('../src/config.js');
+  const notify = await import('../src/notify.js');
+  config.notifEnabled = true;
+  try {
+    const [conAlerta, auto, resuelta] = await leadsMod.addLeads([
+      { estado: ESTADOS.nuevo, direccion: '85 Flamingo Dr', ciudad: 'Boynton Beach', arv_usd: 500000, contacto: 'Luis', telefono: '561-555-0202' },
+      { estado: ESTADOS.nuevo, direccion: '11 Auto Ave', ciudad: 'Jupiter', precio_usd: 120000, arv_usd: 400000 },
+      { estado: ESTADOS.nuevo, direccion: '12 Ok St', arv_usd: 400000 },
+    ]);
+    await actions.evaluarIngresados([conAlerta, auto, resuelta], {});
+    await actions.agregarPrecio(resuelta.id, { precio_usd: '390000' }, 'Andres'); // su alerta ya no aplica
+    await notify.encolar('informe_t1', auto.id, 'Advance — score 72/100');
+
+    const enviados = [];
+    const enviar = async (t) => enviados.push(t);
+    // 3 a. m. en Florida: fuera de horario
+    assert.equal((await notify.revisarEnvio({ ahora: new Date('2026-10-10T07:00:00Z'), enviar })).motivo, 'fuera de horario');
+    // 10 a. m. en Florida: envía un solo mensaje
+    const r = await notify.revisarEnvio({ ahora: new Date('2026-10-10T14:00:00Z'), enviar });
+    assert.equal(r.enviado, true);
+    assert.equal(enviados.length, 1);
+    const t = enviados[0];
+    assert.match(t, /Pedir datos al wholesaler \(1\)/);
+    assert.match(t, /85 Flamingo Dr, Boynton Beach \(ARV \$500k\) — precio · Luis 561-555-0202/);
+    assert.ok(!/Tier 1 \(cumplen|Panel:/.test(t)); // sin sección de Tier 1 automático ni enlace al panel
+    assert.match(t, /Informes Tier 1 listos \(1\)\*\n• 11 Auto Ave, Jupiter — Advance — score 72\/100/);
+    assert.ok(!t.includes('12 Ok St'));
+
+    // Antes de 2 h no vuelve a enviar aunque haya novedades; si falla, la cola se conserva
+    await notify.encolar('alerta', conAlerta.id);
+    assert.equal((await notify.revisarEnvio({ ahora: new Date('2026-10-10T15:00:00Z'), enviar })).motivo, 'intervalo');
+    await assert.rejects(notify.revisarEnvio({ ahora: new Date('2026-10-10T16:30:00Z'), enviar: async () => { throw new Error('sin red'); } }), /sin red/);
+    assert.equal((await notify.revisarEnvio({ ahora: new Date('2026-10-10T16:30:00Z'), enviar })).enviado, true);
+    assert.equal(enviados.length, 2);
+    // Sin novedades no se envía nada
+    assert.equal((await notify.revisarEnvio({ ahora: new Date('2026-10-10T20:00:00Z'), enviar })).motivo, 'sin novedades');
+  } finally {
+    config.notifEnabled = false;
+  }
+});

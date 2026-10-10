@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { config, DATA_DIR } from './config.js';
 import { listLeads, updateLead } from './leads.js';
+import { encolar } from './notify.js';
 
 export const TIPOS = {
   '.html': 'text/html; charset=utf-8',
@@ -30,6 +31,10 @@ function validar(id, nombre) {
 }
 
 const archivo = (id, nombre) => path.join(config.dirs.informes, id, nombre);
+
+const ETIQUETAS = [[/\.html$/i, 'Dashboard'], [/Informe_Completo/i, 'Comparables (completo)'], [/Ejecutivo/i, 'Comparables (ejecutivo)'], [/Alertas/i, 'Alertas'], [/Decision/i, 'Decisión']];
+/** Nombre legible del entregable (el mismo criterio que usa el panel). */
+export const etiquetaInforme = (nombre) => (ETIQUETAS.find(([re]) => re.test(nombre)) || [0, nombre])[1];
 
 /**
  * Guarda un informe recibido como flujo de bytes y lo registra en el lead (lead.informes).
@@ -70,6 +75,7 @@ export async function guardarInforme(id, { tier, nombre }, body, { maxBytes = MA
   }
   const informes = [...(lead.informes || []).filter((i) => i.nombre !== n), informe].sort((a, b) => a.tier - b.tier || a.nombre.localeCompare(b.nombre));
   await updateLead(id, { informes });
+  if (informe.tier === 2) await encolar('informe_t2', id, etiquetaInforme(n));
   return { ok: true, informe };
 }
 

@@ -76,7 +76,7 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
 | C5 | Los criterios se aplican a los leads que entran desde ahora, al agregar el precio y al confirmar una dirección en zona. Los leads anteriores no se reevalúan |
 | C6 | Tier 2 y Compra se activan con botones manuales. Tier 2 lanzará las fases 1–4 en el PC (Fase D) |
 | C7 | "Informe de decisión" es un informe nuevo, por definir. Por ahora se notifican los comparables y las alertas |
-| C8 | Notificaciones por **correo**, no por WhatsApp. Enviar desde el número vinculado (Baileys, no oficial) aumenta el riesgo de bloqueo, y si lo bloquean el monitor se queda sin fuente |
+| C8 | Notificaciones por **WhatsApp con el mismo número** (decisión del usuario, 2026-10-10), en un **resumen cada 2 horas** al "Grupo prueba Wholesaler", solo si hay novedades y entre 8 y 21 h (hora de Florida). El usuario acepta el riesgo bajo de bloqueo. Si algún día se quiere eliminar, la opción es un segundo número solo para avisos |
 
 ### Fases
 - [x] **A. Panel y reglas** (sin tokens):
@@ -87,10 +87,10 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
   - [x] inspección en Tier 1: si se hace, si se ejecutó y la observación, con usuario y fecha;
   - [x] botones "Pasar a Tier 2" y "Pasar a Compra".
 - [x] **B. Enlaces a informes:** al terminar, el ejecutor del PC sube el dashboard HTML a Oracle. El panel y la vista de solo lectura lo enlazan. El informe se sirve aislado (CSP sandbox) para que no pueda usar la API del panel.
-- [ ] **C. Correos** (Gmail con contraseña de aplicación que el usuario pone en el `.env`):
-  - [ ] lead con alerta;
-  - [ ] informe Tier 1 terminado;
-  - [ ] fases de Tier 2.
+- [x] **C. Avisos por WhatsApp** (`src/notify.js`), en un resumen con secciones:
+  - lead con alerta ("Pedir datos al wholesaler");
+  - informe Tier 1 listo o con error;
+  - informes Tier 2 (comparables, alertas, decisión) al subirlos.
 - [ ] **D. Tier 2 automático:** órdenes de las fases 1–4 para el ejecutor del PC, con aviso al terminar los comparables y las alertas.
 
 ## Bitácora
@@ -115,3 +115,11 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
   - Se subió el informe ya existente de 1500 N Congress Ave (2.1 MB).
   - Pruebas: 26/26 en Linux. Verificado en el panel por Tailscale y en la vista pública por Funnel (con token 200; con otro token 404).
   - Respaldos: desde ahora conviene excluir `informes/` (`rsync -a --exclude informes data/ data.bak-…/`), porque los originales están en OneDrive.
+- 2026-10-10: Fase B subida (commit af8a65f).
+- 2026-10-10: Fase C, avisos por WhatsApp.
+  - Cola en `data/notificaciones.json`. Cada 5 minutos se revisa si toca enviar: hay novedades, pasaron 2 horas desde el último resumen y es horario 8–21 h de Florida.
+  - Un solo mensaje por envío, con máximo 10 líneas por sección. Al enviar se vuelve a consultar cada lead: no salen los descartados ni las alertas ya resueltas. Si el envío falla, la cola se conserva.
+  - Los mensajes propios ya se ignoraban al leer el grupo, así que los avisos no vuelven a entrar como leads.
+  - Configuración en `.env` (`NOTIF_*`); en el servidor quedó `NOTIF_ENABLED=true`. Respaldo previo: `.env.bak-fasec` y `data.bak-*-fasec` (sin `informes/`).
+  - Pruebas: 27/27 en Linux.
+- 2026-10-10: a pedido del usuario, el resumen ya no incluye la sección de Tier 1 automático ni el enlace al panel.

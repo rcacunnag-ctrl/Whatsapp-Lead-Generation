@@ -39,6 +39,12 @@ export const config = {
   tier1AutoMaxDia: Number(process.env.TIER1_AUTO_MAX_DIA || 3),
   timeZone: process.env.TZ_NEGOCIO || 'America/New_York',
 
+  // Avisos por WhatsApp (mismo número) al grupo NOTIF_GRUPO: un resumen cada NOTIF_INTERVALO_MIN, en NOTIF_HORAS
+  notifEnabled: bool(process.env.NOTIF_ENABLED, false),
+  notifGrupo: (process.env.NOTIF_GRUPO || 'Grupo prueba Wholesaler').trim(),
+  notifIntervaloMin: Number(process.env.NOTIF_INTERVALO_MIN || 120),
+  notifHoras: process.env.NOTIF_HORAS || '8-21',
+
   dirs: {
     inbox: path.join(DATA_DIR, 'inbox'),
     processed: path.join(DATA_DIR, 'processed'),
@@ -49,6 +55,7 @@ export const config = {
     vista: path.join(DATA_DIR, 'vista'),
   },
   leadsFile: path.join(DATA_DIR, 'leads.json'),
+  notifFile: path.join(DATA_DIR, 'notificaciones.json'),
   stateFile: path.join(DATA_DIR, 'state.json'),
   jsonlFile: path.join(DATA_DIR, 'propiedades.jsonl'),
   csvFile: path.join(DATA_DIR, 'propiedades.csv'),

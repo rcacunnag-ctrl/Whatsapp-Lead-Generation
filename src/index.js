@@ -6,6 +6,7 @@ import { startDashboard } from './dashboard.js';
 import { migrateLegacy } from './migrate.js';
 import { refreshAlertas } from './actions.js';
 import { writeVista, startVista } from './vista.js';
+import { conectarNotificaciones, iniciarNotificaciones } from './notify.js';
 
 const listOnly = process.argv.includes('--list-groups');
 let selected = new Map();
@@ -20,6 +21,7 @@ if (!listOnly) {
   startDashboard();
   await writeVista();
   startVista();
+  iniciarNotificaciones();
 }
 
 async function flush(key, { process: run = true } = {}) {
@@ -78,6 +80,11 @@ await connect({
     }
     selected = sel;
     markReady();
+    if (config.notifEnabled && !listOnly) {
+      const g = all.find((x) => x.name.toLowerCase() === config.notifGrupo.toLowerCase()) || all.find((x) => x.name.toLowerCase().includes(config.notifGrupo.toLowerCase()));
+      conectarNotificaciones(sock, g?.jid);
+      console.log(g ? `Avisos: resumen cada ${config.notifIntervaloMin} min a "${g.name}" (${config.notifHoras} h)` : `Avisos: no se encontró el grupo "${config.notifGrupo}"`);
+    }
     console.log(`Monitoreando ${selected.size} grupo(s): ${[...selected.values()].join(' | ')}`);
     if (config.processMode === 'realtime') await processInbox();
   },

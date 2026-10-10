@@ -7,6 +7,7 @@ import { lanzarCompAnalysis, setJobState } from './tier1.js';
 import { parseMoney } from './extract.js';
 import { exportOutputs } from './sink.js';
 import { borrarInformes } from './informes.js';
+import { encolar } from './notify.js';
 
 const badRequest = (msg) => Object.assign(new Error(msg), { status: 400 });
 /** Usuario que figura cuando los criterios pasan un lead a Tier 1 sin intervención. */
@@ -60,13 +61,15 @@ export async function aplicarCriterios(id, usuario = USUARIO_AUTO) {
   return { ok: true, resultado: c.califica === false ? 'no_califica' : 'falta_arv', motivo: c.motivo };
 }
 
-/** Leads recién ingresados desde WhatsApp: se evalúan con los criterios. */
+/** Leads recién ingresados desde WhatsApp: se evalúan con los criterios y se avisan al grupo. */
 export async function evaluarIngresados(leads, log = console) {
   for (const lead of leads) {
-    if (lead.estado !== ESTADOS.nuevo) continue;
     try {
-      const r = await aplicarCriterios(lead.id);
-      if (r.resultado === 'tier1') log.log?.(`Tier 1 automático: ${lead.direccion} (margen ${lead.margen_pct}%)`);
+      if (lead.estado === ESTADOS.nuevo) {
+        const r = await aplicarCriterios(lead.id);
+        if (r.resultado === 'tier1') log.log?.(`Tier 1 automático: ${lead.direccion} (margen ${lead.margen_pct}%)`);
+      }
+      if ((await getLead(lead.id)).alerta) await encolar('alerta', lead.id);
     } catch (err) {
       log.error?.(`Criterios ${lead.id}: ${err.message}`);
     }
@@ -116,6 +119,8 @@ export async function refreshAlertas() {
 export async function reportarInforme(id, body) {
   const job = await setJobState(id, body);
   if ((await listLeads()).some((l) => l.id === id)) {
+    if (job.estado === 'listo') await encolar('informe_t1', id, job.detalle || '');
+    if (job.estado === 'error') await encolar('informe_t1_error', id, job.detalle || '');
     await updateLead(id, { informe_estado: job.estado, informe_ruta: job.ruta || '', informe_detalle: job.detalle || '', informe_en: job.actualizado_en });
     await exportOutputs();
   }
