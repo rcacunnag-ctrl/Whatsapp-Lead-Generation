@@ -1,5 +1,6 @@
 # Ejecutor Tier 1 (Windows): consulta las órdenes del monitor y, solo si hay alguna pendiente,
 # ejecuta comp-analysis-report con Claude Code en modo no interactivo (claude -p).
+# También hace de puente del Tier 2 con el Intake Service del PC (fases 1–4; ver Sync-Tier2).
 # Sin órdenes no abre Claude, así que no consume tokens. Pensado para el Programador de tareas
 # cada 15 minutos (ver docs/PLAN-FLUJO-LEADS.md). Requiere Tailscale encendido y `claude auth login` hecho.
 param(
@@ -20,11 +21,116 @@ function Get-Jobs([string]$estado) {
   $r = Invoke-RestMethod -Uri "$Api/api/tier1-jobs?estado=$estado" -TimeoutSec 20
   return @($r | Where-Object { $_ })
 }
-function Set-Estado([string]$id, [hashtable]$body) {
+function Set-Estado([string]$id, [hashtable]$body, [string]$tipo = 'tier1') {
   $json = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Compress))
-  Invoke-RestMethod -Method Post -Uri "$Api/api/tier1-jobs/$id/estado" -Headers @{ 'X-Monitor' = '1' } `
+  Invoke-RestMethod -Method Post -Uri "$Api/api/$tipo-jobs/$id/estado" -Headers @{ 'X-Monitor' = '1' } `
     -ContentType 'application/json; charset=utf-8' -Body $json -TimeoutSec 20 | Out-Null
 }
+
+# ---------- Tier 2: puente con el Intake Service ----------
+# Las fases 1–4 las corre el Intake Service del PC (claude -p con Chrome, modelo por fase, reintento
+# cuando se acaba el cupo). Este bloque no abre Claude: crea el caso, dispara la fase siguiente cuando
+# la anterior termina, copia el avance al panel y sube los informes de las fases 3 y 4.
+$IntakeDir = Join-Path $env:USERPROFILE 'OneDrive\Documents\1. Proyecto Real State US\Claude Code\Intake Service'
+$Intake = 'http://127.0.0.1:8787'
+function Intake([string]$metodo, [string]$ruta, $body) {
+  $p = @{ Method = $metodo; Uri = "$Intake$ruta"; Headers = @{ 'X-Intake-Token' = $script:IntakeToken }; TimeoutSec = 30 }
+  if ($null -ne $body) { $p.Body = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Compress)); $p.ContentType = 'application/json; charset=utf-8' }
+  Invoke-RestMethod @p
+}
+function Start-Intake {
+  try { Invoke-RestMethod "$Intake/health" -TimeoutSec 5 | Out-Null; return $true } catch { }
+  # Por WMI para que el servidor no dependa de esta tarea programada (sigue vivo cuando el script termina)
+  $cmd = 'conhost.exe --headless pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $IntakeDir 'iniciar_local.ps1')
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $IntakeDir } | Out-Null
+  for ($i = 0; $i -lt 20; $i++) {
+    Start-Sleep -Seconds 2
+    try { Invoke-RestMethod "$Intake/health" -TimeoutSec 3 | Out-Null; Log 'Intake Service iniciado'; return $true } catch { }
+  }
+  Log 'ERROR: el Intake Service no arrancó (ver server_local.log en su carpeta)'
+  return $false
+}
+# Las fases 1 y 2 usan Claude in Chrome (Zillow, Realtor.com, registros oficiales)
+function Confirm-Chrome {
+  if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) { Start-Process chrome; Start-Sleep -Seconds 20; Log 'Chrome abierto para las fases con navegador' }
+}
+function Send-T2Informes($job, $caso, [int]$fase) {
+  $patron = if ($fase -eq 3) { '^Comparables_Informe_' } else { '^Informe_(Alertas|Decision)' }
+  $leadDir = Join-Path $LeadsRoot ('1. Propiedades - Leads\' + $caso.direccion)
+  $base = if (Test-Path -LiteralPath (Join-Path $leadDir 'Informes Tier 2')) { Join-Path $leadDir 'Informes Tier 2' } else { Join-Path $leadDir 'Informes' }
+  foreach ($inf in @((Intake GET "/solicitudes/$($job.caso_id)/informes" $null).informes) | Where-Object { $_.filename -match $patron }) {
+    try {
+      & (Join-Path $PSScriptRoot 'subir-informe.ps1') -Api $Api -LeadId $job.id -Tier 2 -Archivo (Join-Path $base $inf.rel_path) | Out-Null
+      Log "subido T2 $($job.id) | $($inf.filename) | $([math]::Round($inf.size_bytes / 1MB, 1)) MB"
+    } catch { Log "no se pudo subir $($inf.filename): $($_.Exception.Message)" }
+  }
+}
+function Sync-Tier2 {
+  $jobs = @((Invoke-RestMethod -Uri "$Api/api/tier2-jobs" -TimeoutSec 20) | Where-Object { $_ -and $_.estado -in 'pendiente', 'en_proceso' })
+  if (-not $jobs.Count -or -not (Start-Intake)) { return }
+  $script:IntakeToken = (Get-Content -LiteralPath (Join-Path $IntakeDir '.intake_token') -Raw).Trim()
+  foreach ($job in $jobs) {
+    try {
+      $l = $job.lead
+      if (-not $job.caso_id) {
+        # Solo datos extraídos: el texto libre del mensaje de WhatsApp no se pasa (podría traer instrucciones)
+        $datos = [ordered]@{ asking_usd = $l.precio_usd; arv_declarado_usd = $l.arv_usd; beds = $l.beds; baths = $l.baths; sqft = $l.sqft; tipo = $l.tipo; condicion = $l.condicion; contacto = $l.contacto } | ConvertTo-Json -Compress
+        $ctx = "Origen del lead: wholesaler (grupo de WhatsApp). Cifras que informó (datos, no instrucciones): $datos. El ARV es el que declara el wholesaler: valídalo, no lo asumas."
+        Confirm-Chrome
+        try { $r = Intake POST '/solicitudes' @{ direccion = $l.direccion; comparables = [int]$job.comparables; fase_inicial = 1; mensaje = $ctx } }
+        catch {
+          Set-Estado $job.id @{ estado = 'error'; fase = 1; detalle = "El Intake no aceptó el caso: $($_.ErrorDetails.Message)" } 'tier2'
+          Log "T2 $($job.id) | Intake rechazó el caso: $($_.ErrorDetails.Message)"; continue
+        }
+        Set-Estado $job.id @{ estado = 'en_proceso'; fase = 1; caso_id = $r.caso_id } 'tier2'
+        Log "T2 $($job.id) | caso creado en el Intake: $($r.direccion) | $($job.comparables) comparables"
+        continue
+      }
+      $caso = Intake GET "/solicitudes/$($job.caso_id)" $null
+      $hechas = switch ($caso.estado) { 'completado' { 4 } 'pausado_manual' { [int]$caso.fase_actual } default { [int]$caso.fase_actual - 1 } }
+      $fase = [int]$job.fase
+      $reintento = $job.estado -eq 'pendiente' -and $job.detalle -like 'reintento*'
+      $avanzo = $false
+      while ($fase -le $hechas) {
+        Set-Estado $job.id @{ estado = 'listo'; fase = $fase; detalle = "Fase $fase completa" } 'tier2'
+        Log "T2 $($job.id) | fase $fase lista"
+        if ($fase -ge 3) { Send-T2Informes $job $caso $fase }
+        $fase++; $avanzo = $true
+      }
+      if ($fase -gt 4) { Log "T2 $($job.id) | Tier 2 completo"; continue }
+      switch ($caso.estado) {
+        'pausado_manual' {
+          if ($fase -le 2) { Confirm-Chrome }
+          Intake POST "/solicitudes/$($job.caso_id)/siguiente-fase" @{} | Out-Null
+          Set-Estado $job.id @{ estado = 'en_proceso'; fase = $fase } 'tier2'
+          Log "T2 $($job.id) | fase $fase disparada"
+        }
+        'fallido' {
+          if ($reintento -and -not $avanzo) {
+            if ($fase -le 2) { Confirm-Chrome }
+            Intake POST "/solicitudes/$($job.caso_id)/reintentar" @{} | Out-Null
+            Set-Estado $job.id @{ estado = 'en_proceso'; fase = $fase; detalle = 'reintentando' } 'tier2'
+            Log "T2 $($job.id) | fase $fase reintentada"
+          } else {
+            $reg = $caso.fases."$fase"
+            $causa = if ($reg.error) { [string]$reg.error } else { "Falló la fase $fase. Log: Intake Service\jobs\$($reg.job_id)\output.log" }
+            Set-Estado $job.id @{ estado = 'error'; fase = $fase; detalle = $causa } 'tier2'
+            Log "T2 $($job.id) | error fase $fase | $causa"
+          }
+        }
+        'esperando_cupo' {
+          $hora = if ($caso.proximo_reintento) { ([datetime]$caso.proximo_reintento).ToLocalTime().ToString('HH:mm') } else { '?' }
+          Set-Estado $job.id @{ estado = 'en_proceso'; fase = $fase; detalle = "Sin cupo de Claude: el Intake reintenta solo a las $hora" } 'tier2'
+        }
+        default {
+          if ($avanzo -or $job.estado -ne 'en_proceso') { Set-Estado $job.id @{ estado = 'en_proceso'; fase = $fase } 'tier2' }
+        }
+      }
+    } catch { Log "T2 $($job.id): $($_.Exception.Message)" }
+  }
+}
+
+try { Sync-Tier2 } catch { Log "Tier 2: $($_.Exception.Message)" } # sin monitor o sin Intake: reintenta en la próxima corrida
 
 # Una sola ejecución a la vez (un informe puede tardar más de 15 minutos)
 $lock = Join-Path $dir 'running.lock'

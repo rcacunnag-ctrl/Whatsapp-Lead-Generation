@@ -8,6 +8,7 @@ import { parseMoney } from './extract.js';
 import { exportOutputs } from './sink.js';
 import { borrarInformes } from './informes.js';
 import { encolar } from './notify.js';
+import { lanzarTier2, setTier2State, reintentarTier2, COMPARABLES, FASES } from './tier2.js';
 
 const badRequest = (msg) => Object.assign(new Error(msg), { status: 400 });
 /** Usuario que figura cuando los criterios pasan un lead a Tier 1 sin intervención. */
@@ -190,15 +191,53 @@ export async function registrarInspeccion(id, body, usuario) {
   return { ok: true, resultado: 'inspeccion' };
 }
 
-/** Avance manual Tier 1 -> Tier 2 -> Compra, con usuario y fecha. */
-const AVANCES = { tier2: [ESTADOS.tier1, ESTADOS.tier2], compra: [ESTADOS.tier2, ESTADOS.compra] };
+/** Avance manual Tier 2 -> Compra, con usuario y fecha (Tier 1 -> Tier 2 es pasarATier2). */
+const AVANCES = { compra: [ESTADOS.tier2, ESTADOS.compra] };
 
 export async function avanzar(id, a, usuario) {
   checkUser(usuario);
+  if (!AVANCES[a]) throw badRequest(`Avance no válido: ${a}`);
   const [desde, hacia] = AVANCES[a];
   const lead = await getLead(id);
   if (lead.estado !== desde) throw badRequest(`Solo un lead en ${desde} puede pasar a ${hacia}`);
   await updateLead(id, { estado: hacia, [`${a}_usuario`]: usuario, [`${a}_en`]: new Date().toISOString() });
   await exportOutputs();
   return { ok: true, resultado: a };
+}
+
+/**
+ * Tier 1 -> Tier 2. Si el condado lo cubren los skills (Broward, Palm Beach) deja la orden de las
+ * fases 1–4 para el PC; en otro condado (Martin) solo cambia la etapa: es excepción manual.
+ */
+export async function pasarATier2(id, body, usuario) {
+  checkUser(usuario);
+  const lead = await getLead(id);
+  if (lead.estado !== ESTADOS.tier1) throw badRequest('Solo un lead en Tier 1 puede pasar a Tier 2');
+  const comparables = Number(body.comparables || 12);
+  if (!COMPARABLES.includes(comparables)) throw badRequest(`Comparables: ${COMPARABLES.join(', ')}`);
+  const cubierto = config.tier2Counties.some((c) => c.toLowerCase() === String(lead.condado || '').toLowerCase());
+  const updated = await updateLead(id, { estado: ESTADOS.tier2, tier2_usuario: usuario, tier2_en: new Date().toISOString(), tier2_comparables: comparables });
+  const skill = cubierto ? await lanzarTier2(updated, usuario, { comparables }) : { lanzado: false, motivo: `${lead.condado || 'condado sin confirmar'}: Tier 2 manual (los skills cubren ${config.tier2Counties.join(' y ')})` };
+  await updateLead(id, skill.lanzado ? { tier2_estado: 'pendiente', tier2_fase: 1, tier2_detalle: '' } : { tier2_estado: '', tier2_detalle: skill.motivo });
+  await exportOutputs();
+  return { ok: true, resultado: 'tier2', skill };
+}
+
+/** El PC reporta el avance de una fase de Tier 2; se refleja en el lead y avisa si falla. */
+export async function reportarTier2(id, body) {
+  const job = await setTier2State(id, body);
+  if ((await listLeads()).some((l) => l.id === id)) {
+    await updateLead(id, { tier2_estado: job.estado, tier2_fase: job.fase, tier2_detalle: job.detalle || '', tier2_actualizado: job.actualizado_en });
+    if (job.estado === 'error') await encolar('informe_t2_error', id, `Fase ${job.fase} (${FASES[job.fase]}): ${job.detalle || 'sin detalle'}`);
+    await exportOutputs();
+  }
+  return { ok: true, orden: job };
+}
+
+export async function reintentarTier2Lead(id, usuario) {
+  checkUser(usuario);
+  const job = await reintentarTier2(id);
+  await updateLead(id, { tier2_estado: job.estado, tier2_detalle: job.detalle });
+  await exportOutputs();
+  return { ok: true, resultado: 'reintento', fase: job.fase };
 }

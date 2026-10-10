@@ -8,7 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { exportXlsx, exportOutputs } from './sink.js';
 import { listLeads } from './leads.js';
-import { descartar, pasarATier1, agregarDireccion, agregarPrecio, reportarInforme, registrarInspeccion, avanzar } from './actions.js';
+import { descartar, pasarATier1, agregarDireccion, agregarPrecio, reportarInforme, registrarInspeccion, avanzar, pasarATier2, reportarTier2, reintentarTier2Lead } from './actions.js';
+import { listTier2Jobs } from './tier2.js';
 import { listJobs } from './tier1.js';
 import { migrateLegacy } from './migrate.js';
 import { PAGE } from './page.js';
@@ -20,7 +21,8 @@ const ACTIONS = {
   direccion: (id, body) => agregarDireccion(id, body, body.usuario),
   precio: (id, body) => agregarPrecio(id, body, body.usuario),
   inspeccion: (id, body) => registrarInspeccion(id, body, body.usuario),
-  tier2: (id, body) => avanzar(id, 'tier2', body.usuario),
+  tier2: (id, body) => pasarATier2(id, body, body.usuario),
+  reintentar2: (id, body) => reintentarTier2Lead(id, body.usuario),
   compra: (id, body) => avanzar(id, 'compra', body.usuario),
 };
 
@@ -39,7 +41,9 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
         }
         const job = url.pathname.match(/^\/api\/tier1-jobs\/([\w-]+)\/estado$/);
         if (job) return send(res, 200, 'application/json', JSON.stringify(await reportarInforme(job[1], await readJson(req))));
-        const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion|precio|inspeccion|tier2|compra)$/);
+        const job2 = url.pathname.match(/^\/api\/tier2-jobs\/([\w-]+)\/estado$/);
+        if (job2) return send(res, 200, 'application/json', JSON.stringify(await reportarTier2(job2[1], await readJson(req))));
+        const m = url.pathname.match(/^\/api\/leads\/([\w-]+)\/(descartar|tier1|direccion|precio|inspeccion|tier2|reintentar2|compra)$/);
         if (!m) return send(res, 404, 'text/plain', 'No encontrado');
         const out = await ACTIONS[m[2]](m[1], await readJson(req));
         return send(res, 200, 'application/json', JSON.stringify(out));
@@ -51,6 +55,9 @@ export function startDashboard({ port = config.dashboardPort, host = config.dash
       }
       if (url.pathname === '/api/tier1-jobs') {
         return send(res, 200, 'application/json', JSON.stringify(await listJobs({ estado: url.searchParams.get('estado') || undefined })));
+      }
+      if (url.pathname === '/api/tier2-jobs') {
+        return send(res, 200, 'application/json', JSON.stringify(await listTier2Jobs({ estado: url.searchParams.get('estado') || undefined })));
       }
       if (url.pathname === '/descargar/csv') {
         const data = await fs.readFile(config.csvFile).catch(() => Buffer.from(''));

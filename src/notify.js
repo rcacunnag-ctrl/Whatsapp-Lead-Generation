@@ -12,6 +12,7 @@ const SECCIONES = [
   ['informe_t1', '✅ Informes Tier 1 listos'],
   ['informe_t1_error', '❌ Informes Tier 1 con error'],
   ['informe_t2', '📄 Informes Tier 2 listos'],
+  ['informe_t2_error', '❌ Tier 2 con error'],
 ];
 const MAX_POR_SECCION = 10;
 
@@ -48,7 +49,7 @@ export function conectarNotificaciones(sock, jid) {
   enviarFn = jid ? (text) => sock.sendMessage(jid, { text }) : null;
 }
 
-/** Agrega una novedad a la cola. tipo: alerta | informe_t1 | informe_t1_error | informe_t2 */
+/** Agrega una novedad a la cola. tipo: alerta | informe_t1 | informe_t1_error | informe_t2 | informe_t2_error */
 export function encolar(tipo, id, detalle = '') {
   if (!config.notifEnabled) return Promise.resolve();
   return serial(async () => {

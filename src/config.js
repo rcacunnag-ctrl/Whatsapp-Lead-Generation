@@ -37,6 +37,9 @@ export const config = {
   critPrecioMax: Number(process.env.CRIT_PRECIO_MAX || 300000),
   // Informes Tier 1 automáticos que pueden empezar por día (los demás esperan al día siguiente)
   tier1AutoMaxDia: Number(process.env.TIER1_AUTO_MAX_DIA || 3),
+  // Tier 2: fases 1–4 en el PC ejecutor. Los skills cubren solo estos condados (Martin es excepción manual)
+  tier2SkillEnabled: bool(process.env.TIER2_SKILL_ENABLED, false),
+  tier2Counties: list(process.env.TIER2_COUNTIES || 'Broward,Palm Beach'),
   timeZone: process.env.TZ_NEGOCIO || 'America/New_York',
 
   // Avisos por WhatsApp (mismo número) al grupo NOTIF_GRUPO: un resumen cada NOTIF_INTERVALO_MIN, en NOTIF_HORAS
@@ -52,6 +55,7 @@ export const config = {
     media: path.join(DATA_DIR, 'media'),
     tier1Jobs: path.join(DATA_DIR, 'tier1-jobs'),
     informes: path.join(DATA_DIR, 'informes'),
+    tier2Jobs: path.join(DATA_DIR, 'tier2-jobs'),
     vista: path.join(DATA_DIR, 'vista'),
   },
   leadsFile: path.join(DATA_DIR, 'leads.json'),

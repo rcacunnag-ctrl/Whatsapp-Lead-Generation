@@ -434,7 +434,7 @@ test('Tier 1: inspección, Tier 2 y Compra', async () => {
   const get = async (id) => (await leadsMod.listLeads()).find((l) => l.id === id);
   const [l] = await leadsMod.addLeads([{ estado: ESTADOS.nuevo, direccion: '70 Insp St', precio_usd: 250000, arv_usd: 400000 }]);
   await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Andres'), /en Tier 1/);
-  await assert.rejects(actions.avanzar(l.id, 'tier2', 'Andres'), /Solo un lead en Tier 1/);
+  await assert.rejects(actions.pasarATier2(l.id, {}, 'Andres'), /Solo un lead en Tier 1/);
   await actions.pasarATier1(l.id, 'Andres');
   await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Tal vez' }, 'Andres'), /Sí o No/);
   await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Pedro'), /Usuario no válido/);
@@ -446,7 +446,8 @@ test('Tier 1: inspección, Tier 2 y Compra', async () => {
   assert.equal(insp.inspeccion_usuario, 'Carlos');
   await assert.rejects(actions.pasarATier1(l.id, 'Andres'), /ya está en Tier 1/);
 
-  assert.equal((await actions.avanzar(l.id, 'tier2', 'Jaime')).resultado, 'tier2');
+  await assert.rejects(actions.avanzar(l.id, 'compra', 'Jaime'), /Solo un lead en Tier 2/);
+  assert.equal((await actions.pasarATier2(l.id, { comparables: 12 }, 'Jaime')).resultado, 'tier2');
   await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Jaime'), /en Tier 1/);
   assert.equal((await actions.avanzar(l.id, 'compra', 'Jaime')).resultado, 'compra');
   const fin = await get(l.id);
@@ -548,5 +549,48 @@ test('avisos por WhatsApp: resumen cada 2 h, en horario, solo novedades vigentes
     assert.equal((await notify.revisarEnvio({ ahora: new Date('2026-10-10T20:00:00Z'), enviar })).motivo, 'sin novedades');
   } finally {
     config.notifEnabled = false;
+  }
+});
+
+test('Tier 2: orden por fases para el Intake, avance, error, reintento y condado no cubierto', async () => {
+  const { config } = await import('../src/config.js');
+  const { listTier2Jobs } = await import('../src/tier2.js');
+  const get = async (id) => (await leadsMod.listLeads()).find((l) => l.id === id);
+  const [pb, martin] = await leadsMod.addLeads([
+    { estado: ESTADOS.tier1, direccion: '1500 N Congress Ave', ciudad: 'West Palm Beach', zip: '33401', condado: 'Palm Beach', precio_usd: 149900, arv_usd: 225000 },
+    { estado: ESTADOS.tier1, direccion: '8 SE Steeplechase Cir', ciudad: 'Jupiter', zip: '33469', condado: 'Martin', precio_usd: 200000, arv_usd: 600000 },
+  ]);
+  config.tier2SkillEnabled = true;
+  try {
+    await assert.rejects(actions.pasarATier2(pb.id, { comparables: 15 }, 'Carlos'), /Comparables: 8, 12, 20/);
+    const r = await actions.pasarATier2(pb.id, { comparables: 12 }, 'Carlos');
+    assert.equal(r.skill.lanzado, true);
+    const [job] = (await listTier2Jobs({ estado: 'pendiente' })).filter((j) => j.id === pb.id);
+    assert.equal(job.fase, 1);
+    assert.equal(job.comparables, 12);
+    assert.equal(job.lead.direccion, '1500 N Congress Ave, West Palm Beach, FL 33401');
+
+    // Martin: solo cambia la etapa, sin orden
+    const m = await actions.pasarATier2(martin.id, {}, 'Carlos');
+    assert.equal(m.skill.lanzado, false);
+    assert.equal((await get(martin.id)).estado, ESTADOS.tier2);
+    assert.match((await get(martin.id)).tier2_detalle, /Martin: Tier 2 manual/);
+
+    await actions.reportarTier2(pb.id, { estado: 'en_proceso', fase: 1, caso_id: 'caso-1' });
+    await actions.reportarTier2(pb.id, { estado: 'listo', fase: 1 });
+    await assert.rejects(actions.reportarTier2(pb.id, { estado: 'listo', fase: 1 }), /fase 2, no en la 1/);
+    assert.deepEqual([(await get(pb.id)).tier2_fase, (await get(pb.id)).tier2_estado], [2, 'pendiente']);
+    await actions.reportarTier2(pb.id, { estado: 'error', fase: 2, detalle: 'Zillow bloqueó' });
+    assert.equal((await get(pb.id)).tier2_estado, 'error');
+    const re = await actions.reintentarTier2Lead(pb.id, 'Carlos');
+    assert.equal(re.fase, 2);
+    const [j2] = (await listTier2Jobs({ estado: 'pendiente' })).filter((j) => j.id === pb.id);
+    assert.equal(j2.caso_id, 'caso-1');
+    assert.match(j2.detalle, /^reintento/);
+    for (const f of [2, 3, 4]) await actions.reportarTier2(pb.id, { estado: 'listo', fase: f });
+    assert.equal((await get(pb.id)).tier2_estado, 'completo');
+    await assert.rejects(actions.reportarTier2(pb.id, { estado: 'en_proceso' }), /ya está completo/);
+  } finally {
+    config.tier2SkillEnabled = false;
   }
 });

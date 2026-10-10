@@ -12,7 +12,7 @@ export const ESTADOS_ORDEN = ['pendiente', 'en_proceso', 'listo', 'error'];
 const jobFile = (id) => path.join(config.dirs.tier1Jobs, `${path.basename(id)}.json`);
 
 /** Datos del lead que viajan en la orden. Formato de carpeta de los skills: "<número calle>, <Ciudad>, FL <zip>" */
-const jobLead = (lead) => ({
+export const jobLead = (lead) => ({
   id: lead.id,
   direccion: [lead.direccion, lead.ciudad, `FL ${lead.zip || ''}`.trim()].filter(Boolean).join(', '),
   condado: lead.condado,

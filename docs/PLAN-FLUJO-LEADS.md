@@ -91,7 +91,7 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
   - lead con alerta ("Pedir datos al wholesaler");
   - informe Tier 1 listo o con error;
   - informes Tier 2 (comparables, alertas, decisión) al subirlos.
-- [ ] **D. Tier 2 automático:** órdenes de las fases 1–4 para el ejecutor del PC, con aviso al terminar los comparables y las alertas.
+- [x] **D. Tier 2 automático** con el Intake Service del PC (ver bitácora 2026-10-10)
 
 ## Bitácora
 - 2026-10-06: plan creado. Decisiones: R6 = Census y, si no resuelve, Revisar condado. Dirección = número + calle. R7 = no reingresa.
@@ -123,3 +123,22 @@ El mapa y las pestañas los procesa el navegador. Los informes son archivos est�
   - Configuración en `.env` (`NOTIF_*`); en el servidor quedó `NOTIF_ENABLED=true`. Respaldo previo: `.env.bak-fasec` y `data.bak-*-fasec` (sin `informes/`).
   - Pruebas: 27/27 en Linux.
 - 2026-10-10: a pedido del usuario, el resumen ya no incluye la sección de Tier 1 automático ni el enlace al panel.
+- 2026-10-10: Fase C subida (commit be628b1).
+- 2026-10-10: Fase D, Tier 2 automático. Se reutiliza el **Intake Service** del PC, que ya corría las fases 1–4 con `claude -p`.
+  - **Qué aporta el Intake:** Chrome conectado, modelo por fase (Sonnet en 1, 2 y 4; Opus en 3), reintento automático cuando se acaba el cupo (espera la hora de reinicio), registro de tokens y Excel de control.
+  - **Los skills no se modifican.**
+  - **Oracle** (`src/tier2.js`): "Pasar a Tier 2" pide la cantidad de comparables (8, 12 o 20; la Fase 2 la exige) y deja una orden por lead que avanza fase por fase: pendiente → en_proceso → listo (pasa a la siguiente) | error, y al final "completo".
+  - **API:** `GET /api/tier2-jobs` y `POST /api/tier2-jobs/<id>/estado` (`fase` debe coincidir con la fase en curso; `caso_id` es el del Intake). El panel muestra "Fase N/4 · estado" y, si hay error, el botón "Reintentar fase N".
+  - **Condados:** solo Broward y Palm Beach, que son los que cubren los skills. Martin pasa a Tier 2 sin orden: queda como excepción manual.
+  - **Avisos al grupo:** informes Tier 2 listos (al subirse) y "Tier 2 con error".
+  - **Puente en `scripts/tier1-runner.ps1` (`Sync-Tier2`, sin abrir Claude):**
+    - arranca el Intake si no responde, con `iniciar_local.ps1` vía WMI para que siga vivo cuando termina la tarea;
+    - crea el caso con el contexto del wholesaler (solo datos extraídos);
+    - dispara `siguiente-fase` al terminar cada fase;
+    - reporta el avance y los errores, y respeta el estado `esperando_cupo`;
+    - reintenta solo cuando se pide desde el panel;
+    - sube los .docx de comparables (fase 3) y de alertas/decisión (fase 4);
+    - abre Chrome si está cerrado antes de las fases 1 y 2.
+  - **Ajustes al Intake `server.py`** (respaldo `server.py.bak-2026-10-10`): busca los informes en `Informes Tier 2/` y el contexto llega a todas las fases. Además, `iniciar_local.ps1` pasa el `--plugin-dir` con los skills de la app.
+  - **Pruebas:** 28/28 en Linux y prueba aislada del Intake. El Intake arrancó por WMI y respondió `/health`. El puente sin órdenes termina limpio. Falta la primera corrida real, que consume tokens y espera la orden del usuario.
+  - En el servidor quedó `TIER2_SKILL_ENABLED=true`. Respaldos: `.env.bak-fased` y `data.bak-*-fased`.

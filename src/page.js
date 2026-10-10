@@ -52,6 +52,9 @@ dialog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var
 <label>Precio (asking)<input name="precio_usd" inputmode="decimal" placeholder="325000 o $325k"></label>
 <label>ARV (opcional)<input name="arv_usd" inputmode="decimal" placeholder="480000 o $480k"></label>
 </div>
+<div id="t2Fields" hidden>
+<label>Comparables (Fase 2)<select name="comparables"><option value="8">8 · lectura rápida</option><option value="12" selected>12 · suficiente para decidir</option><option value="20">20 · valuación formal</option></select></label>
+</div>
 <div id="inspFields" hidden>
 <label>¿Se hace inspección?<select name="inspeccion_se_hace"><option>Sí</option><option>No</option></select></label>
 <label>¿Se ejecutó?<select name="inspeccion_ejecutada"><option>Pendiente</option><option>Sí</option><option>No</option></select></label>
@@ -79,6 +82,7 @@ const margen=r=>r.precio_usd&&r.arv_usd?Math.round((r.arv_usd-r.precio_usd)/r.ar
 const INF={pendiente:'en cola',en_proceso:'generando…',listo:'listo ✓',error:'error'};
 const informe=r=>r.informe_estado?'<div class="m" title="'+esc([r.informe_ruta,r.informe_detalle].filter(Boolean).join(' · '))+'">Informe: '+esc(INF[r.informe_estado]||r.informe_estado)+'</div>':'';
 const fecha=s=>esc(String(s||'').slice(0,10));
+const T2={pendiente:'en cola',en_proceso:'generando…',error:'error'};
 // Enlaces a los informes subidos (el HTML se abre en el navegador; .docx/.xlsx se descargan)
 const ETIQ=[[/\\.html$/i,'Dashboard'],[/Informe_Completo/i,'Comparables (completo)'],[/Ejecutivo/i,'Comparables (ejecutivo)'],[/Alertas/i,'Alertas'],[/Decision/i,'Decisión']];
 const etiqueta=n=>(ETIQ.find(([re])=>re.test(n))||[0,n])[1];
@@ -88,7 +92,9 @@ function detalle(r){const d=[];
  if(r.estado==='No califica'&&r.criterio)d.push('No califica: '+esc(r.criterio));
  if(r.tier1_usuario)d.push('Tier 1: '+esc(r.tier1_usuario)+' '+fecha(r.tier1_en));
  if(r.inspeccion_se_hace)d.push('Inspección: '+(r.inspeccion_se_hace==='No'?'no se hace':'ejecutada: '+esc(r.inspeccion_ejecutada))+(r.inspeccion_obs?'<br><i>'+esc(r.inspeccion_obs)+'</i>':''));
- if(r.tier2_usuario)d.push('Tier 2: '+esc(r.tier2_usuario)+' '+fecha(r.tier2_en));
+ if(r.tier2_usuario)d.push('Tier 2: '+esc(r.tier2_usuario)+' '+fecha(r.tier2_en)+(r.tier2_comparables?' · '+r.tier2_comparables+' comps':''));
+ if(r.tier2_estado)d.push(r.tier2_estado==='completo'?'Fases 1–4: completas ✓':'Fase '+esc(r.tier2_fase)+'/4 · '+esc(T2[r.tier2_estado]||r.tier2_estado)+(r.tier2_detalle?'<br><i>'+esc(r.tier2_detalle)+'</i>':''));
+ else if(r.tier2_detalle)d.push('<i>'+esc(r.tier2_detalle)+'</i>');
  if(r.compra_usuario)d.push('Compra: '+esc(r.compra_usuario)+' '+fecha(r.compra_en));
  return d.map(x=>'<div class="m">'+x+'</div>').join('')}
 const fullAddr=r=>[r.direccion,r.ciudad,(r.ciudad||r.zip)&&r.direccion?'FL '+(r.zip||''):r.zip].filter(Boolean).join(', ').trim()||'—';
@@ -107,6 +113,7 @@ function actions(r){if(RO)return '';const b=[],btn=(a,t,c)=>'<button class="'+(c
  if(PREVIOS.includes(r.estado)&&r.precio_usd)b.push(btn('tier1','Tier 1'));
  if(!r.precio_usd)b.push(btn('precio','Agregar precio'));
  if(r.estado==='Tier 1')b.push(btn('inspeccion',r.inspeccion_se_hace?'Editar inspección':'Inspección'),btn('tier2','Pasar a Tier 2'));
+ if(r.estado==='Tier 2'&&r.tier2_estado==='error')b.push(btn('reintentar2','Reintentar fase '+r.tier2_fase));
  if(r.estado==='Tier 2')b.push(btn('compra','Pasar a Compra'));
  b.push(btn('descartar','Descartar','del'));return '<div class="acc">'+b.join('')+'</div>'}
 function render(){const e=$('estado').value,c=$('condado').value,dup=$('dup').value,q=$('q').value.toLowerCase(),en=TABS[tab];
@@ -118,20 +125,20 @@ async function post(id,a,body){const res=await fetch('/api/leads/'+id+'/'+a,{met
 // Muestra un grupo de campos; los ocultos se deshabilitan para que no viajen en el formulario.
 function show(id,on){$(id).hidden=!on;$(id).querySelectorAll('input,select,textarea').forEach(i=>i.disabled=!on)}
 const CRIT='margen ≥ 60 % y precio < $300k';
-const TITULO={direccion:'Dirección del wholesaler',tier1:'Pasar a Tier 1',precio:'Precio del wholesaler',inspeccion:'Inspección',tier2:'Pasar a Tier 2',compra:'Pasar a Compra'};
-const BOTON={direccion:'Validar y continuar',tier1:'Pasar a Tier 1',precio:'Guardar precio',inspeccion:'Guardar inspección',tier2:'Pasar a Tier 2',compra:'Pasar a Compra'};
+const TITULO={direccion:'Dirección del wholesaler',tier1:'Pasar a Tier 1',precio:'Precio del wholesaler',inspeccion:'Inspección',tier2:'Pasar a Tier 2',reintentar2:'Reintentar Tier 2',compra:'Pasar a Compra'};
+const BOTON={direccion:'Validar y continuar',tier1:'Pasar a Tier 1',precio:'Guardar precio',inspeccion:'Guardar inspección',tier2:'Pasar a Tier 2',reintentar2:'Reintentar',compra:'Pasar a Compra'};
 function openDlg(a,r){current={a,id:r.id};const f=$('frm'),dir=a==='direccion',pre=a==='precio',ins=a==='inspeccion';
- show('dirFields',dir);show('precioFields',pre);show('inspFields',ins);
+ show('dirFields',dir);show('precioFields',pre);show('inspFields',ins);show('t2Fields',a==='tier2');
  f.calle.value=dir&&r.estado==='Revisar condado'?(r.direccion||''):'';f.ciudad.value=dir?(r.ciudad||''):'';f.zip.value=dir?(r.zip||''):'';f.calle.required=dir;
  f.precio_usd.value=r.precio_usd??'';f.arv_usd.value=r.arv_usd??'';f.precio_usd.required=pre;
  if(ins){f.inspeccion_se_hace.value=r.inspeccion_se_hace||'Sí';f.inspeccion_ejecutada.value=r.inspeccion_ejecutada||'Pendiente';f.inspeccion_obs.value=r.inspeccion_obs||'';f.inspeccion_ejecutada.disabled=f.inspeccion_se_hace.value==='No'}
  $('dlgTitle').textContent=TITULO[a];
  $('dlgInfo').textContent=dir?'Si está en Broward, Palm Beach o Martin se evalúan los criterios ('+CRIT+'): si cumple pasa a Tier 1 automático; si no, queda "No califica". Fuera de esos condados se descarta.':fullAddr(r);
  const skill='Lanzar comp-analysis-report: '+(skillOn?'se enviará al PC ejecutor.':'por habilitar.');
- $('skillNote').textContent={tier1:skill,direccion:skill,precio:'Si cumple los criterios ('+CRIT+') pasa a Tier 1 automático. Queda registrado quién agregó el precio.',inspeccion:'Queda registrado quién la documentó y cuándo.',tier2:'Por ahora solo cambia la etapa; el lanzamiento de las fases 1–4 llega en la siguiente entrega.',compra:'Queda registrado quién lo pasó y cuándo.'}[a];
+ $('skillNote').textContent={tier1:skill,direccion:skill,precio:'Si cumple los criterios ('+CRIT+') pasa a Tier 1 automático. Queda registrado quién agregó el precio.',inspeccion:'Queda registrado quién la documentó y cuándo.',tier2:'Se ejecutan las fases 1–4 en el PC (Intake Service), una tras otra; se avisa al grupo al terminar los informes. La Fase 2 consume ~400k tokens con 20 comparables. Solo Broward y Palm Beach; otro condado queda como Tier 2 manual.',reintentar2:'Vuelve a correr la fase que falló.',compra:'Queda registrado quién lo pasó y cuándo.'}[a];
  $('dlgOk').textContent=BOTON[a];$('dlg').showModal()}
 $('frm').inspeccion_se_hace.onchange=ev=>{$('frm').inspeccion_ejecutada.disabled=ev.target.value==='No'};
-const MSG=d=>({descartado:'Descartado: fuera de condado ('+(d.condado||'?')+')',precio:'Precio guardado',falta_precio:'Dirección guardada ('+(d.condado||'')+'). Falta el precio para pasar a Tier 1',falta_arv:'Guardado. Falta el ARV para evaluar los criterios',no_califica:'No califica: '+(d.motivo||''),tier1:'Lead en Tier 1'+(d.auto?' (cumple los criterios)':'')+(d.condado?' ('+d.condado+')':''),inspeccion:'Inspección guardada',tier2:'Lead en Tier 2',compra:'Lead en Compra'})[d.resultado]||'Listo';
+const MSG=d=>({descartado:'Descartado: fuera de condado ('+(d.condado||'?')+')',precio:'Precio guardado',falta_precio:'Dirección guardada ('+(d.condado||'')+'). Falta el precio para pasar a Tier 1',falta_arv:'Guardado. Falta el ARV para evaluar los criterios',no_califica:'No califica: '+(d.motivo||''),tier1:'Lead en Tier 1'+(d.auto?' (cumple los criterios)':'')+(d.condado?' ('+d.condado+')':''),inspeccion:'Inspección guardada',tier2:'Lead en Tier 2'+(d.skill&&d.skill.lanzado?': fases 1–4 en cola':''),reintento:'Fase '+d.fase+' en cola de nuevo',compra:'Lead en Compra'})[d.resultado]||'Listo';
 // Se guarda en el envío del formulario (no en el evento close del diálogo, que no siempre se dispara).
 $('frm').addEventListener('submit',async ev=>{if(ev.submitter?.value!=='ok'||!current)return;const fd=Object.fromEntries(new FormData($('frm')));store.set('usuario',fd.usuario);
  try{toast(MSG(await post(current.id,current.a,fd)))}catch(e){toast(e.message)}current=null;load()});
