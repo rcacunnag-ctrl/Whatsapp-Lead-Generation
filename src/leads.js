@@ -9,7 +9,10 @@ export const ESTADOS = {
   nuevo: 'Nuevo',
   pendienteDireccion: 'Pendiente dirección',
   revisarCondado: 'Revisar condado',
+  noCalifica: 'No califica',
   tier1: 'Tier 1',
+  tier2: 'Tier 2',
+  compra: 'Compra',
 };
 
 let db;

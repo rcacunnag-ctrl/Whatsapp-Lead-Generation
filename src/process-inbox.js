@@ -5,6 +5,7 @@ import { listInbox, moveTo, loadState, saveState } from './store.js';
 import { processPost } from './pipeline.js';
 import { exportOutputs } from './sink.js';
 import { addLeads } from './leads.js';
+import { evaluarIngresados } from './actions.js';
 import { closeOcr } from './ocr.js';
 
 let running = null;
@@ -14,6 +15,7 @@ async function processFile(file, summary) {
   const post = JSON.parse(await fs.readFile(file, 'utf8'));
   const { rows, descartes } = await processPost(post);
   const added = await addLeads(rows);
+  await evaluarIngresados(added); // criterios: Tier 1 automático o No califica
   // Se marca como visto solo después de escribir, para poder reintentar si falla la escritura.
   const state = await loadState();
   const now = new Date().toISOString();

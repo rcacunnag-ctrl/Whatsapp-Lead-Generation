@@ -57,6 +57,42 @@ Fecha: 2026-10-06 · Estado: **completado y desplegado en Oracle** (2026-10-06).
 - La validación con IA. El flujo actual usa reglas.
 - Login propio del panel. El acceso lo controla Tailscale.
 
+## Plan 2 (2026-10-10): etapas, criterios, mapa, informes y notificaciones
+
+Todo cabe en Oracle Always Free sin costo. Medición del 2026-10-10:
+- RAM: el monitor usa 138 MB y quedan 378 MB disponibles, además de 1.8 GB de swap.
+- Disco: 6.8 de 45 GB.
+- Carga: 0.09.
+
+El mapa y las pestañas los procesa el navegador. Los informes son archivos estáticos pequeños y los correos son pocos al día. El límite real es el plan de Claude: cada informe Tier 1 dura unos 22 minutos. Por eso los Tier 1 automáticos tienen un tope diario.
+
+### Decisiones
+| # | Decisión |
+|---|---|
+| C1 | Condados: Palm Beach, Broward y Martin (ya existía; R4/R5) |
+| C2 | Margen = (ARV − precio) / ARV × 100 |
+| C3 | **Tier 1 automático** si el margen es **≥ 60 %** y el precio es **< $300,000**. Si no cumple, queda **"No califica"** con el motivo, en la pestaña Nuevo, y se puede pasar a Tier 1 a mano. Sin precio o sin ARV queda Nuevo con la alerta "Solicitar … al wholesaler" |
+| C4 | Tope de **3 informes Tier 1 automáticos por día** (zona America/New_York). Los que no caben esperan al día siguiente. Los Tier 1 manuales no tienen tope |
+| C5 | Los criterios se aplican a los leads que entran desde ahora, al agregar el precio y al confirmar una dirección en zona. Los leads anteriores no se reevalúan |
+| C6 | Tier 2 y Compra se activan con botones manuales. Tier 2 lanzará las fases 1–4 en el PC (Fase D) |
+| C7 | "Informe de decisión" es un informe nuevo, por definir. Por ahora se notifican los comparables y las alertas |
+| C8 | Notificaciones por **correo**, no por WhatsApp. Enviar desde el número vinculado (Baileys, no oficial) aumenta el riesgo de bloqueo, y si lo bloquean el monitor se queda sin fuente |
+
+### Fases
+- [x] **A. Panel y reglas** (sin tokens):
+  - [x] pestañas Nuevo / Tier 1 / Tier 2 / Compra;
+  - [x] mapa emergente (Google Maps embebido, sin clave);
+  - [x] margen visible;
+  - [x] criterios C3 con tope C4;
+  - [x] inspección en Tier 1: si se hace, si se ejecutó y la observación, con usuario y fecha;
+  - [x] botones "Pasar a Tier 2" y "Pasar a Compra".
+- [ ] **B. Enlaces a informes:** al terminar, el ejecutor del PC sube el dashboard HTML a Oracle. El panel y la vista de solo lectura lo enlazan. El informe se sirve aislado (CSP sandbox) para que no pueda usar la API del panel.
+- [ ] **C. Correos** (Gmail con contraseña de aplicación que el usuario pone en el `.env`):
+  - [ ] lead con alerta;
+  - [ ] informe Tier 1 terminado;
+  - [ ] fases de Tier 2.
+- [ ] **D. Tier 2 automático:** órdenes de las fases 1–4 para el ejecutor del PC, con aviso al terminar los comparables y las alertas.
+
 ## Bitácora
 - 2026-10-06: plan creado. Decisiones: R6 = Census y, si no resuelve, Revisar condado. Dirección = número + calle. R7 = no reingresa.
 - 2026-10-06: implementado (`src/leads.js`, `actions.js`, `tier1.js`, `migrate.js`; cambios en `pipeline.js`, `sink.js`, `dashboard.js`, `process-inbox.js`, `config.js`). Pruebas: 18/18 en Linux (la de OCR falla solo en Windows por la ruta del fixture, no por estos cambios). Prueba manual del panel con datos de ejemplo: migración, Tier 1, agregar dirección (en zona, fuera y sin determinar) y rechazo de peticiones externas (403).

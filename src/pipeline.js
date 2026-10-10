@@ -7,12 +7,37 @@ import { ESTADOS } from './leads.js';
 const ADDRESS_STATUS = { complete: 'COMPLETA', partial: 'PARCIAL', missing: 'SIN DIRECCION' };
 export const ALERTA_DIRECCION = 'Solicitar dirección al wholesaler';
 
-/** Alerta del lead según lo que falta pedirle al wholesaler: dirección (Pendiente dirección) y/o precio. */
+/**
+ * Alerta del lead según lo que falta pedirle al wholesaler: dirección (Pendiente dirección), precio
+ * y ARV (este solo antes de Tier 1, porque sin él no se pueden evaluar los criterios).
+ */
 export function computeAlerta(lead) {
   const falta = [];
   if (lead.estado === ESTADOS.pendienteDireccion) falta.push('dirección');
   if (!lead.precio_usd) falta.push('precio');
-  return falta.length ? `Solicitar ${falta.join(' y ')} al wholesaler` : '';
+  if (!lead.arv_usd && [ESTADOS.nuevo, ESTADOS.revisarCondado].includes(lead.estado)) falta.push('ARV');
+  if (!falta.length) return '';
+  const lista = falta.length > 1 ? `${falta.slice(0, -1).join(', ')} y ${falta.at(-1)}` : falta[0];
+  return `Solicitar ${lista} al wholesaler`;
+}
+
+/** Margen del wholesaler: (ARV - precio) / ARV, en %. null si falta precio o ARV. */
+export function margenPct({ precio_usd: precio, arv_usd: arv }) {
+  if (!precio || !arv) return null;
+  return Math.round(((arv - precio) / arv) * 1000) / 10;
+}
+
+/**
+ * Criterios de Tier 1 automático: margen >= critMargenMin y precio < critPrecioMax.
+ * califica: true | false | null (falta precio o ARV). motivo: por qué no califica.
+ */
+export function evaluarCriterios(lead) {
+  const margen = margenPct(lead);
+  if (margen === null) return { califica: null, margen, motivo: '' };
+  const fallos = [];
+  if (margen < config.critMargenMin) fallos.push(`margen ${margen}% < ${config.critMargenMin}%`);
+  if (lead.precio_usd >= config.critPrecioMax) fallos.push(`precio ≥ $${config.critPrecioMax.toLocaleString('en-US')}`);
+  return { califica: !fallos.length, margen, motivo: fallos.join(' y ') };
 }
 
 export function inTargetCounty(county) {
@@ -66,7 +91,8 @@ export async function processPost(post, deps = {}) {
 
     out.rows.push({
       estado: decision.estado,
-      alerta: computeAlerta({ estado: decision.estado, precio_usd: l.price_usd }),
+      alerta: computeAlerta({ estado: decision.estado, precio_usd: l.price_usd, arv_usd: l.arv_usd }),
+      margen_pct: margenPct({ precio_usd: l.price_usd, arv_usd: l.arv_usd }),
       fecha_mensaje: post.timestamp,
       grupo: post.groupName,
       autor: post.sender,

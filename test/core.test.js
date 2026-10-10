@@ -239,11 +239,12 @@ test('acciones: descartar borra y bloquea reingreso; Tier 1 registra usuario', a
 });
 
 test('acciones: agregar dirección a un lead con ARV', async () => {
-  const [p1, p2, p3, p4] = await leadsMod.addLeads([
+  const [p1, p2, p3, p4, p5] = await leadsMod.addLeads([
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, precio_usd: 150000, alerta: 'x' },
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
+    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
     { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, precio_usd: 300000, alerta: 'x' },
-    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
-    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
-    { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, alerta: 'x' },
   ]);
   await assert.rejects(actions.pasarATier1(p1.id, 'Jaime'), /Primero agrega la dirección/);
   const geo = (county, ambiguous = false) => ({ geocode: async () => ({ county, ambiguous, method: 'test' }) });
@@ -254,6 +255,13 @@ test('acciones: agregar dirección a un lead con ARV', async () => {
   assert.equal(lead.estado, ESTADOS.tier1);
   assert.equal(lead.direccion, '500 E Ocean Ave');
   assert.equal(lead.alerta, '');
+  assert.equal(lead.tier1_usuario, 'Jaime');
+  assert.equal(lead.tier1_auto, true);
+
+  // En zona con precio, pero margen 25 %: no califica
+  const nc = await actions.agregarDireccion(p5.id, { calle: '700 E Ocean Ave', ciudad: 'Boynton Beach', zip: '33435' }, 'Jaime', geo('Palm Beach'));
+  assert.equal(nc.resultado, 'no_califica');
+  assert.equal((await leadsMod.listLeads()).find((l) => l.id === p5.id).estado, ESTADOS.noCalifica);
 
   // En zona pero sin precio: queda como Nuevo con la alerta de precio, no pasa a Tier 1
   const sp = await actions.agregarDireccion(p4.id, { calle: '600 E Ocean Ave', ciudad: 'Boynton Beach', zip: '33435' }, 'Jaime', geo('Palm Beach'));
@@ -346,8 +354,10 @@ test('órdenes Tier 1: pendiente -> en proceso -> listo, reflejado en el lead', 
 
 test('regla de precio: alerta, agregar precio y Tier 1', async () => {
   const { computeAlerta } = await import('../src/pipeline.js');
-  assert.equal(computeAlerta({ estado: ESTADOS.nuevo, precio_usd: 300000 }), '');
-  assert.equal(computeAlerta({ estado: ESTADOS.nuevo }), 'Solicitar precio al wholesaler');
+  assert.equal(computeAlerta({ estado: ESTADOS.nuevo, precio_usd: 300000, arv_usd: 1 }), '');
+  assert.equal(computeAlerta({ estado: ESTADOS.nuevo, arv_usd: 1 }), 'Solicitar precio al wholesaler');
+  assert.equal(computeAlerta({ estado: ESTADOS.nuevo }), 'Solicitar precio y ARV al wholesaler');
+  assert.equal(computeAlerta({ estado: ESTADOS.tier1, precio_usd: 1 }), '');
   assert.equal(computeAlerta({ estado: ESTADOS.pendienteDireccion }), 'Solicitar dirección y precio al wholesaler');
   assert.equal(computeAlerta({ estado: ESTADOS.pendienteDireccion, precio_usd: 1 }), 'Solicitar dirección al wholesaler');
 
@@ -357,13 +367,92 @@ test('regla de precio: alerta, agregar precio y Tier 1', async () => {
   await assert.rejects(actions.agregarPrecio(lead.id, { precio_usd: '300000' }, 'Pedro'), /Usuario no válido/);
   await assert.rejects(actions.pasarATier1(lead.id, 'Andres'), /Falta el precio/);
 
-  assert.equal((await actions.agregarPrecio(lead.id, { precio_usd: '$325k', arv_usd: '' }, 'Andres')).resultado, 'precio');
+  // margen (450k - 325k) / 450k = 27.8 %: queda No califica
+  assert.equal((await actions.agregarPrecio(lead.id, { precio_usd: '$325k', arv_usd: '' }, 'Andres')).resultado, 'no_califica');
   const l = (await leadsMod.listLeads()).find((x) => x.id === lead.id);
   assert.equal(l.precio_usd, 325000);
   assert.equal(l.arv_usd, 450000); // ARV vacío deja el que había
   assert.equal(l.alerta, '');
   assert.equal(l.cambios.at(-1).usuario, 'Andres');
-  // Con precio ya no se puede volver a cambiar desde el panel, y ya puede pasar a Tier 1
+  assert.equal(l.estado, ESTADOS.noCalifica);
+  assert.equal(l.margen_pct, 27.8);
+  // Con precio ya no se puede volver a cambiar desde el panel; Tier 1 manual sigue disponible
   await assert.rejects(actions.agregarPrecio(lead.id, { precio_usd: '400000' }, 'Carlos'), /ya tiene precio/);
   assert.equal((await actions.pasarATier1(lead.id, 'Carlos')).resultado, 'tier1');
+});
+
+test('criterios: Tier 1 automático con tope diario, No califica y falta ARV', async () => {
+  const { evaluarCriterios } = await import('../src/pipeline.js');
+  const { listJobs } = await import('../src/tier1.js');
+  const { config } = await import('../src/config.js');
+  assert.deepEqual(evaluarCriterios({ precio_usd: 150000, arv_usd: 400000 }), { califica: true, margen: 62.5, motivo: '' });
+  assert.equal(evaluarCriterios({ precio_usd: 160000, arv_usd: 400000 }).califica, true); // 60 % exacto
+  assert.match(evaluarCriterios({ precio_usd: 200000, arv_usd: 400000 }).motivo, /margen 50% < 60%/);
+  assert.match(evaluarCriterios({ precio_usd: 300000, arv_usd: 900000 }).motivo, /precio ≥ \$300,000/);
+  assert.equal(evaluarCriterios({ precio_usd: 150000 }).califica, null);
+
+  config.tier1SkillEnabled = true;
+  try {
+    const nuevos = await leadsMod.addLeads([
+      ...[1, 2, 3, 4].map((n) => ({ estado: ESTADOS.nuevo, direccion: `${n}0 Auto St`, precio_usd: 100000, arv_usd: 400000 })),
+      { estado: ESTADOS.nuevo, direccion: '50 Caro St', precio_usd: 350000, arv_usd: 1000000 },
+      { estado: ESTADOS.nuevo, direccion: '60 SinArv St', precio_usd: 100000 },
+      { estado: ESTADOS.pendienteDireccion, arv_usd: 400000, precio_usd: 100000 },
+    ]);
+    await actions.evaluarIngresados(nuevos, {});
+    const get = async (id) => (await leadsMod.listLeads()).find((l) => l.id === id);
+    for (const n of nuevos.slice(0, 4)) {
+      const l = await get(n.id);
+      assert.equal(l.estado, ESTADOS.tier1);
+      assert.equal(l.tier1_usuario, 'Automático');
+      assert.equal(l.margen_pct, 75);
+    }
+    assert.equal((await get(nuevos[4].id)).estado, ESTADOS.noCalifica);
+    assert.match((await get(nuevos[4].id)).criterio, /precio/);
+    assert.equal((await get(nuevos[5].id)).estado, ESTADOS.nuevo);
+    assert.equal((await get(nuevos[5].id)).alerta, 'Solicitar ARV al wholesaler');
+    assert.equal((await get(nuevos[6].id)).estado, ESTADOS.pendienteDireccion); // sin dirección no se evalúa
+
+    // Tope diario de 3 automáticos: el cuarto espera; los que empiezan consumen cupo
+    const ids = new Set(nuevos.map((n) => n.id));
+    const pend = async () => (await listJobs({ estado: 'pendiente' })).filter((j) => ids.has(j.id));
+    assert.equal((await pend()).length, 3);
+    const [j1, j2] = await pend();
+    await actions.reportarInforme(j1.id, { estado: 'en_proceso' });
+    await actions.reportarInforme(j2.id, { estado: 'en_proceso' });
+    assert.equal((await pend()).length, 1);
+    // Un Tier 1 manual no tiene tope
+    const [m] = await leadsMod.addLeads([{ estado: ESTADOS.nuevo, direccion: '80 Manual St', precio_usd: 390000, arv_usd: 400000 }]);
+    await actions.pasarATier1(m.id, 'Carlos');
+    assert.ok((await listJobs({ estado: 'pendiente' })).some((j) => j.id === m.id && !j.auto));
+  } finally {
+    config.tier1SkillEnabled = false;
+  }
+});
+
+test('Tier 1: inspección, Tier 2 y Compra', async () => {
+  const get = async (id) => (await leadsMod.listLeads()).find((l) => l.id === id);
+  const [l] = await leadsMod.addLeads([{ estado: ESTADOS.nuevo, direccion: '70 Insp St', precio_usd: 250000, arv_usd: 400000 }]);
+  await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Andres'), /en Tier 1/);
+  await assert.rejects(actions.avanzar(l.id, 'tier2', 'Andres'), /Solo un lead en Tier 1/);
+  await actions.pasarATier1(l.id, 'Andres');
+  await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Tal vez' }, 'Andres'), /Sí o No/);
+  await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Pedro'), /Usuario no válido/);
+  await actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'No', inspeccion_ejecutada: 'Sí' }, 'Andres');
+  assert.equal((await get(l.id)).inspeccion_ejecutada, 'No');
+  await actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí', inspeccion_ejecutada: 'Sí', inspeccion_obs: '  Techo con filtraciones  ' }, 'Carlos');
+  const insp = await get(l.id);
+  assert.equal(insp.inspeccion_obs, 'Techo con filtraciones');
+  assert.equal(insp.inspeccion_usuario, 'Carlos');
+  await assert.rejects(actions.pasarATier1(l.id, 'Andres'), /ya está en Tier 1/);
+
+  assert.equal((await actions.avanzar(l.id, 'tier2', 'Jaime')).resultado, 'tier2');
+  await assert.rejects(actions.registrarInspeccion(l.id, { inspeccion_se_hace: 'Sí' }, 'Jaime'), /en Tier 1/);
+  assert.equal((await actions.avanzar(l.id, 'compra', 'Jaime')).resultado, 'compra');
+  const fin = await get(l.id);
+  assert.equal(fin.estado, ESTADOS.compra);
+  assert.equal(fin.tier2_usuario, 'Jaime');
+  assert.equal(fin.compra_usuario, 'Jaime');
+  const csv = await fs.readFile(path.join(process.env.DATA_DIR, 'propiedades.csv'), 'utf8');
+  assert.match(csv, /Techo con filtraciones/);
 });
